@@ -70,7 +70,7 @@ If you use Symbo in research or production, please cite and attribute the author
 
 ---
 
-## 📜 License — Apache 2.0
+## License — Apache 2.0
 
 This project is licensed under the **Apache License, Version 2.0**, which permits:
 
@@ -98,7 +98,7 @@ limitations under the License.
 
 ---
 
-## 📝 NOTICE
+## NOTICE
 
 This product includes original work by:  
 **Damien Davison & Michael Maillet (Recursive AI Devs)**  
