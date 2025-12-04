@@ -2,6 +2,8 @@
 ### © 2025 Damien Davison & Michael Maillet  
 ### Recursive AI Devs  
 Licensed under the Apache License, Version 2.0
+psychcoherence@gmail.com OR therealmichaelmaillet@gmail.com
+
 
 Symbo is a hybrid symbolic–numeric reasoning system built from the ground up by
 deconstructing **318 classical algorithms** across algebra, optimization, dynamics,
