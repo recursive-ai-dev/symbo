@@ -27,13 +27,13 @@ mathematical interpretability.
 
 Symbo provides:
 
-- **A true n-dimensional symbolic tensor type**  
-- **A generative Taylor-expansion core**  
-- **A multi-method coefficient solver** (Gröbner bases, perturbation theory, least squares)  
-- **Arrow/MessagePack serialization for high-speed I/O**  
-- **WASM-friendly execution for browser runtimes**  
-- **Manifold-based reasoning via A* pathfinding**  
-- **Explainability through derivative trees and variable influence mapping**
+- A true n-dimensional symbolic tensor type
+- A generative Taylor-expansion core 
+- A multi-method coefficient solver (Gröbner bases, perturbation theory, least squares)  
+- Arrow/MessagePack serialization for high-speed I/O  
+- WASM-friendly execution for browser runtimes  
+- Manifold-based reasoning via A* pathfinding
+- Explainability through derivative trees and variable influence mapping
 
 This repository contains the full implementation, usage examples, demos, and
 a high-level description of the architecture derived from the algorithmic decomposition
