@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "Symbo: A Hybrid Generative Symbolic Reasoning Engine"
+message: "If you use Symbo in your research or software, please cite it using the following metadata."
+type: software
+authors:
+  - family-names: Davison
+    given-names: Damien
+  - family-names: Maillet
+    given-names: Michael
+  - family-names: Davison
+    given-names: Sacha
+abstract: >
+  Symbo is a hybrid symbolic–numeric reasoning engine that reconstructs
+  318 classical algorithms into atomic primitives, enabling generative,
+  interpretable, and mathematically exact computation. The NanoTensor
+  architecture supports Taylor manifold expansions, Gröbner-based solving,
+  perturbation analysis, pathfinding over symbolic energy landscapes, and
+  neuro-symbolic training.
+version: "1.0.0"
+date-released: 2025-01-01
+license: "Apache-2.0"
+repository-code: "https://github.com/recursive-ai-dev/symbo"
+url: "https://github.com/recursive-ai-dev/symbo"
