@@ -1,0 +1,24 @@
+# Core symbolic and numeric computation
+sympy>=1.12
+numpy>=1.24.0
+torch>=2.0.0
+
+# Optimization
+scikit-optimize>=0.9.0
+
+# Logic programming
+kanren>=0.2.3
+
+# Graph and network analysis
+networkx>=3.0
+
+# Plotting and visualization
+matplotlib>=3.7.0
+plotly>=5.14.0
+
+# Optional serialization (for MessagePack and Arrow support)
+msgpack>=1.0.5
+pyarrow>=12.0.0
+
+# Optional web dashboard
+streamlit>=1.28.0
