@@ -1,5 +1,5 @@
 # Symbo — A Hybrid Generative Symbolic Reasoning Engine
-### © 2025 Damien Davison & Michael Maillet  
+### © 2025 Damien Davison & Michael Maillet & Sacha Davison
 ### Recursive AI Devs  
 Licensed under the Apache License, Version 2.0
 psychcoherence@gmail.com OR therealmichaelmaillet@gmail.com
@@ -48,6 +48,8 @@ Project Authors
 Damien Davison — Architect, Symbolic Systems
 
 Michael Maillet — Architect, Computational Structures
+
+Sacha Davison — Architect, Project Manager
 
 Recursive AI Devs — Foundational Research Team
 
