@@ -83,7 +83,7 @@ This project is licensed under the **Apache License, Version 2.0**, which permit
 - Use in closed-source or open-source projects  
 
 Copyright 2025
-Damien Davison & Michael Maillet
+Damien Davison & Michael Maillet & Sacha Davison
 Recursive AI Devs
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -103,5 +103,5 @@ limitations under the License.
 ## NOTICE
 
 This product includes original work by:  
-**Damien Davison & Michael Maillet (Recursive AI Devs)**  
+**Damien Davison & Michael Maillet & Sacha Davison (Recursive AI Devs)**  
 Additional details can be found in the project's LICENSE and source headers.
