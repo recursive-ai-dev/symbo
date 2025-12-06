@@ -179,15 +179,15 @@ def wasm_eval_expression(expr_str: str, var_values: Dict[str, float]) -> float:
 
 def wasm_groebner_solve_json(poly_strs: List[str],
                              var_names: List[str]) -> str:
-     """
-    Compute a Gröbner basis and solutions from string input and return JSON.
+    """
+    Compute a Groebner basis and solutions from string input and return JSON.
 
     This function is tailored for WASM or remote contexts where the caller
     only communicates via strings. It:
 
     1. Parses a list of polynomial expressions from strings.
     2. Constructs SymPy symbols for the given variable names.
-    3. Computes a Gröbner basis under lexicographic order.
+    3. Computes a Groebner basis under lexicographic order.
     4. Attempts to solve the system symbolically.
     5. Returns a JSON string containing:
        - "basis": list of stringified basis polynomials,
@@ -205,7 +205,7 @@ def wasm_groebner_solve_json(poly_strs: List[str],
     str
         JSON-encoded result containing basis and solutions.
     """
-    
+
     polys = [sp.sympify(s) for s in poly_strs]
     vars_syms = [sp.Symbol(v) for v in var_names]
     G = groebner(polys, *vars_syms, order='lex')
@@ -263,6 +263,7 @@ class NanoTensor:
         self.base_vars = [sp.Symbol(v) for v in (base_vars or ['k', 'a', 'eps', 'sig'])]
         self.coeff_vars: List[sp.Symbol] = []
         self.data: np.ndarray = np.empty(shape, dtype=object)
+        self._diff_cache: Dict[Tuple[str, int], 'NanoTensor'] = {}
         self._init_data()
         self._symvars_cache = None
         self._lambdify_cache: Dict = {}
@@ -272,6 +273,7 @@ class NanoTensor:
         """Initialize tensor with symbolic zeros"""
         self.data = np.zeros(self.shape, dtype=object)
         self.data.flat[:] = sp.S(0)
+        self._diff_cache.clear()
 
     @staticmethod
     def _heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
@@ -398,6 +400,19 @@ class NanoTensor:
         new_nt = NanoTensor(self.shape, self.max_order, [v.name for v in self.base_vars])
         new_nt.data = np.vectorize(lambda e: sp.diff(e, wrt, order))(self.data)
         return new_nt
+
+    def diff_cached(self, wrt_name: str, order: int = 1) -> 'NanoTensor':
+        """
+        Cached differentiation keyed by variable name and order.
+
+        Avoids recomputing repeated derivative requests during benchmarking
+        or exploratory analysis.
+        """
+        key = (wrt_name, order)
+        if key not in self._diff_cache:
+            wrt = next((s for s in self.base_vars if s.name == wrt_name), sp.Symbol(wrt_name))
+            self._diff_cache[key] = self.diff(wrt, order)
+        return self._diff_cache[key]
     
     def subs(self, sub_dict: Dict[sp.Symbol, Any]) -> 'NanoTensor':
         """
@@ -610,7 +625,8 @@ class NanoTensor:
         else:
             return x, y
     
-    def generate_taylor(self, center: Dict[str, float], ss_value: sp.Expr = None):
+    def generate_taylor(self, center: Dict[str, float], ss_value: sp.Expr = None,
+                        include_bias: bool = True):
         """
         Construct a multivariate Taylor polynomial around a steady state.
 
@@ -625,6 +641,8 @@ class NanoTensor:
         ss_value : sympy.Expr, optional
             Steady-state level of the function being approximated. If None,
             defaults to the sum of the base variables.
+        include_bias : bool, optional
+            If True, prepend a constant coefficient term g_bias.
 
         Notes
         -----
@@ -636,12 +654,18 @@ class NanoTensor:
         self.coeff_vars.clear()
         self._symvars_cache = None
         self._lambdify_cache.clear()
+        self._diff_cache.clear()
 
         if ss_value is None:
             ss_value = sum([v for v in self.base_vars])  # default to sum
 
         devs = [sp.Symbol(v.name) - center.get(v.name, 0) for v in self.base_vars]
         taylor_expr = ss_value
+
+        if include_bias:
+            c0 = sp.Symbol('g_bias')
+            self.coeff_vars.append(c0)
+            taylor_expr += c0
 
         # Linear terms
         for v, dev in zip(self.base_vars, devs):
@@ -666,6 +690,7 @@ class NanoTensor:
         # After changing data, symvars/lambdify cache must be considered stale
         self._symvars_cache = None
         self._lambdify_cache.clear()
+        self._diff_cache.clear()
 
     
     def compute_steady_state(self, model_eqs: List[sp.Expr], 
@@ -725,7 +750,8 @@ class NanoTensor:
     
     def full_perturbation(self, model_R: sp.Expr, params: Dict[str, Any], 
                          var_order: List[str] = ['k', 'a', 'eps', 'sig'],
-                         eps_var: float = 1.0):
+                         eps_var: float = 1.0,
+                         ss_guess: Dict[str, float] = None):
         """
         Perform a full 2nd-order perturbation around the steady state.
 
@@ -751,6 +777,8 @@ class NanoTensor:
             Ordered list of variable names used in the perturbation sequence.
         eps_var : float, optional
             Variance term used when substituting E[eps'^2].
+        ss_guess : dict[str, float], optional
+            Initial steady-state guess passed to `compute_steady_state`.
 
         Notes
         -----
@@ -759,7 +787,7 @@ class NanoTensor:
         back into `self.data`.
         """
         # Compute steady state
-        ss = self.compute_steady_state([model_R], params)
+        ss = self.compute_steady_state([model_R], params, ss_guess=ss_guess)
         self.coeff_vars.clear()
         self.generate_taylor(ss)
         self.fitted_coeffs = {}
@@ -768,6 +796,14 @@ class NanoTensor:
         sym_vars = {v.name: v for v in self.base_vars}
         subs_ss = {**{sp.Symbol(k): v for k, v in ss.items()}, 
                   **{sp.Symbol(k): v for k, v in params.items()}}
+
+        # Substitute the Taylor policy into the model residual if k_next appears.
+        policy_expr = self.data.flat[0]
+        k_next_sym = sp.Symbol('k_next')
+        if k_next_sym in model_R.free_symbols:
+            model_R_policy = model_R.subs(k_next_sym, policy_expr)
+        else:
+            model_R_policy = model_R
         
         print(f"Computed steady state: {ss}")
         
@@ -777,7 +813,7 @@ class NanoTensor:
                 continue
             wrt = sym_vars[vname]
             # Differentiate and evaluate at steady state
-            R_v = sp.simplify(sp.diff(model_R, wrt))
+            R_v = sp.simplify(sp.diff(model_R_policy, wrt))
             R_v_ss = R_v.subs({**subs_ss, **{sp.Symbol(k): v for k, v in self.fitted_coeffs.items()}})
             
             coeff_name = f'g_{vname}'
@@ -806,7 +842,7 @@ class NanoTensor:
                 wrt1 = sym_vars[v1]
                 
                 # Diagonal terms
-                R_vv = sp.diff(model_R, wrt1, 2)
+                R_vv = sp.diff(model_R_policy, wrt1, 2)
                 R_vv_ss = R_vv.subs({**subs_ss, **{sp.Symbol(k): v for k, v in self.fitted_coeffs.items()}})
                 coeff_name = f'g_{v1}_{v1}'
                 coeff_sym = sp.Symbol(coeff_name)
@@ -826,7 +862,7 @@ class NanoTensor:
                         continue
                     wrt2 = sym_vars[v2]
                     
-                    R_v1v2 = sp.diff(sp.diff(model_R, wrt1), wrt2)
+                    R_v1v2 = sp.diff(sp.diff(model_R_policy, wrt1), wrt2)
                     R_v1v2_ss = R_v1v2.subs({**subs_ss, **{sp.Symbol(k): v for k, v in self.fitted_coeffs.items()}})
                     coeff_name = f'g_{v1}_{v2}'
                     coeff_sym = sp.Symbol(coeff_name)
@@ -843,7 +879,7 @@ class NanoTensor:
         # R_σσ = h_22 + h_33 * Var(ε')
         if 'sig' in var_order:
             sig_sym = sym_vars['sig']
-            R_ss = sp.diff(model_R, sig_sym, 2)
+            R_ss = sp.diff(model_R_policy, sig_sym, 2)
             subs_variance = {sp.Symbol('eps_next')**2: eps_var}
             R_ss_sub = R_ss.subs(subs_variance)
             R_ss_ss = sp.simplify(R_ss_sub.subs({**subs_ss, **{sp.Symbol(k): v for k, v in self.fitted_coeffs.items()}}))
@@ -866,6 +902,7 @@ class NanoTensor:
         """Simplify all expressions in tensor"""
         self.data = np.vectorize(sp.simplify)(self.data)
         self._symvars_cache = None  # Clear cache
+        self._diff_cache.clear()
         
     def compute_grid(self, var1: str, var2: str,
                      fixed: Dict[str, float] = None,
@@ -1186,9 +1223,17 @@ class SymbolicTrainer:
         if method == 'symbolic':
             return self._fit_symbolic(data)
         elif method == 'perturbation':
-            if len(data) >= 2:
-                model_R, params = data[0], data[1]
-                self.nt.full_perturbation(model_R, params)
+            if len(data) >= 1:
+                # Accept either [ (model_R, params) ], [ (model_R, params, ss_guess) ], or [model_R, params, ss_guess]
+                if isinstance(data[0], tuple) and len(data[0]) in (2, 3):
+                    model_R, params, *maybe_guess = data[0]
+                elif len(data) >= 2:
+                    model_R, params, *maybe_guess = data + [None]
+                else:
+                    return False
+
+                ss_guess = maybe_guess[0] if maybe_guess else None
+                self.nt.full_perturbation(model_R, params, ss_guess=ss_guess)
                 self.fitted_coeffs = getattr(self.nt, 'fitted_coeffs', {})
                 return len(self.fitted_coeffs) > 0
         elif method == 'lsq':
@@ -1278,6 +1323,14 @@ class HybridTrainer(SymbolicTrainer):
         return np.array([self.predict({f'x{i}': X[j,i] for i in range(X.shape[1])}).flat[0] 
                         for j in range(len(X))])
     
+    @staticmethod
+    def make_loader(X: np.ndarray, y: np.ndarray, batch_size: int = 32, shuffle: bool = True) -> torch.utils.data.DataLoader:
+        """Convenience builder for DataLoader with float32 tensors."""
+        X_t = torch.tensor(X, dtype=torch.float32)
+        y_t = torch.tensor(y, dtype=torch.float32)
+        ds = torch.utils.data.TensorDataset(X_t, y_t)
+        return torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
+    
     def multi_obj_fit(self, sparse_data: List, dense_data: np.ndarray, 
                      alpha_exact: float = 0.7):
         """
@@ -1307,8 +1360,25 @@ class HybridTrainer(SymbolicTrainer):
         
         self._apply_solution(self.fitted_coeffs)
     
-    def torch_fit(self, loader: torch.utils.data.DataLoader, epochs: int = 100):
-        """Neuro-symbolic: optimize symbolic coefficients via PyTorch"""
+    def torch_fit(self, loader: torch.utils.data.DataLoader, epochs: int = 100,
+                  lr: float = 1e-3, weight_decay: float = 0.0,
+                  betas: Tuple[float, float] = (0.9, 0.999)):
+        """
+        Neuro-symbolic: optimize symbolic coefficients via PyTorch.
+
+        Parameters
+        ----------
+        loader : DataLoader
+            Batches of (X, y).
+        epochs : int
+            Training epochs.
+        lr : float
+            Learning rate for Adam.
+        weight_decay : float
+            L2 regularization coefficient.
+        betas : tuple[float, float]
+            Adam momentum parameters.
+        """
         # Convert symbolic tensor to torch module
         class SymModule(nn.Module):
             def __init__(self, nt: NanoTensor):
@@ -1316,17 +1386,19 @@ class HybridTrainer(SymbolicTrainer):
                 self.nt = nt
                 # Register coefficients as parameters
                 self.coeff_params = nn.ParameterDict({
-                    c.name: nn.Parameter(torch.tensor(0.1)) for c in nt.coeff_vars
+                    c.name: nn.Parameter(torch.tensor(0.1, dtype=torch.float32)) for c in nt.coeff_vars
                 })
+                vars_syms = list(nt.base_vars) + list(nt.coeff_vars)
+                # Torch-friendly callable for the current symbolic expression
+                self._lambda = sp.lambdify(vars_syms, nt.data.flat[0], modules='torch')
             
             def forward(self, *args):
-                # Substitute coefficients and evaluate
-                subs_dict = {sp.Symbol(k): v.item() for k, v in self.coeff_params.items()}
-                nt_sub = self.nt.subs(subs_dict)
-                return nt_sub.eval_numeric({f'x{i}': args[i] for i in range(len(args))})
+                coeff_vals = [self.coeff_params[c.name] for c in self.nt.coeff_vars]
+                return self._lambda(*args, *coeff_vals)
         
         module = SymModule(self.nt)
-        opt = torch.optim.Adam(module.parameters(), lr=1e-3)
+        opt = torch.optim.Adam(module.parameters(), lr=lr,
+                               weight_decay=weight_decay, betas=betas)
         
         for epoch in range(epochs):
             total_loss = 0
@@ -1388,7 +1460,7 @@ class KnowledgeBase:
 
 # ==================== Demo & Benchmarks ====================
 
-def demo_rbc_perturbation():
+def demo_rbc_perturbation(ss_guess: Dict[str, float] = None):
     """
     Full RBC model perturbation demo matching Northwestern PDF.
     Computes policy function k' = g(k,a,eps,sig) via 2nd-order expansion.
@@ -1428,11 +1500,13 @@ def demo_rbc_perturbation():
     R = uc - beta * uc_next * fkp_next
     
     # Create and fit
-    nt = NanoTensor((1,), max_order=2, base_vars=['k', 'a', 'eps', 'sig'])
+    nt = NanoTensor((1,), max_order=1, base_vars=['k', 'a', 'eps', 'sig'])
     trainer = SymbolicTrainer(nt)
     
     start = time.time()
-    success = trainer.fit([(R, params)], method='perturbation')
+    if ss_guess is None:
+        ss_guess = {'k': 1.0, 'a': 0.0, 'eps': 0.0, 'sig': 1.0}
+    success = trainer.fit([(R, params, ss_guess)], method='perturbation')
     elapsed = time.time() - start
     
     print(f"Perturbation fit: {'✅ Success' if success else '❌ Failed'} ({elapsed:.3f}s)")
