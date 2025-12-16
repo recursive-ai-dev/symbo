@@ -23,7 +23,7 @@ Key Features:
 
 import sympy as sp
 from sympy import groebner, Symbol, Poly, solve
-from typing import List, Dict, Generator, Optional, Tuple, Any
+from typing import List, Dict, Generator, Optional, Tuple, Any, Union
 import json
 import time
 
