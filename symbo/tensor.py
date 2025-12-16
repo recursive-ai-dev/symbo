@@ -436,9 +436,9 @@ class SymbolicTensor:
     def __sub__(self, other: Union['SymbolicTensor', sp.Expr]) -> 'SymbolicTensor':
         """Element-wise subtraction."""
         if isinstance(other, SymbolicTensor):
-            return self.__add__(other * -1)
+            return self.__add__(other * (-1))
         else:
-            return self.__add__(-1 * other)
+            return self.__add__((-1) * other)
     
     def __truediv__(self, other: Union['SymbolicTensor', sp.Expr]) -> 'SymbolicTensor':
         """Element-wise division."""
