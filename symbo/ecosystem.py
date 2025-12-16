@@ -434,8 +434,10 @@ class MockChrono(TemporalPropagator):
                         dynamics: Dict[sp.Symbol, sp.Expr],
                         time_horizon: float,
                         dt: float) -> List[Dict[sp.Symbol, float]]:
-        # Placeholder: return initial state
-        return [symbolic_state]
+        # Placeholder: return initial state as floats
+        numeric_state = {k: float(v) if hasattr(v, 'evalf') else float(v) 
+                        for k, v in symbolic_state.items()}
+        return [numeric_state]
     
     def compute_lyapunov_exponents(self,
                                    dynamics: Dict[sp.Symbol, sp.Expr],
