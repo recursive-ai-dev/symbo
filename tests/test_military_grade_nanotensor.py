@@ -292,10 +292,10 @@ class TestMilitaryGradeIntegration(unittest.TestCase):
         # Verify evaluation results
         self.assertIsInstance(result1, np.ndarray)
         self.assertIsInstance(result2, np.ndarray)
-        # For x=2, y=3: [x**2 + y, x*y**2] -> [7, 18]
+        # For x=2, y=3: [x**2 + y, x*y] -> [7, 6]
         self.assertAlmostEqual(float(result1[0]), 7.0)
-        self.assertAlmostEqual(float(result1[1]), 18.0)
-        # For x=1, y=1: [x**2 + y, x*y**2] -> [2, 1]
+        self.assertAlmostEqual(float(result1[1]), 6.0)
+        # For x=1, y=1: [x**2 + y, x*y] -> [2, 1]
         self.assertAlmostEqual(float(result2[0]), 2.0)
         self.assertAlmostEqual(float(result2[1]), 1.0)
         

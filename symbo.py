@@ -745,6 +745,7 @@ class NanoTensor:
             error_msg = str(e)
             raise
         finally:
+            duration = time.time() - start_time
             # Anomaly detection using pattern *before* recording this operation
             if "evaluation" in self._learned_patterns:
                 pattern = self._learned_patterns["evaluation"]
@@ -755,7 +756,6 @@ class NanoTensor:
                             f"Anomalous evaluation detected: {duration:.4f}s vs avg {pattern['avg_duration']:.4f}s"
                         )
             
-            duration = time.time() - start_time
             self._record_operation("evaluation", duration, success, error_msg)
         
     def apply_linear_coeffs(self, coeffs: Dict[str, float]):
