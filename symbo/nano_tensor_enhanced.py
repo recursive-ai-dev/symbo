@@ -24,9 +24,8 @@ reason, learn, and act autonomously.
 
 import sympy as sp
 import numpy as np
-import torch
-from typing import Tuple, Dict, Any, List, Optional, Union, Callable
-from functools import lru_cache, wraps
+from typing import Tuple, Dict, Any, List, Optional, Callable
+from functools import wraps
 from dataclasses import dataclass, field
 from collections import deque
 import time
@@ -398,7 +397,7 @@ class MilitaryGradeNanoTensor:
                 # Simplify before substitution
                 self.simplify()
                 return None  # Indicate to retry
-            except:
+            except Exception:
                 pass
         
         return None
@@ -657,8 +656,12 @@ class MilitaryGradeNanoTensor:
         if self.metrics.success_rate < 0.95:
             try:
                 self.simplify()
-            except:
-                pass
+            except Exception as exc:
+                # Simplification is best-effort; log failure but do not interrupt optimization.
+                warnings.warn(
+                    f"optimize(): simplify() failed for tensor '{self.name}': {exc}",
+                    RuntimeWarning,
+                )
         
         # Clear old caches if they're getting too large
         if len(self._eval_cache) > self.max_cache_size * 0.9:

@@ -329,15 +329,18 @@ class NanoTensor:
         if op_type not in self._learned_patterns:
             self._learned_patterns[op_type] = {
                 "count": 0,
+                "success_count": 0,
                 "avg_duration": 0.0,
                 "success_rate": 1.0
             }
         
         pattern = self._learned_patterns[op_type]
         pattern["count"] += 1
+        if success:
+            pattern["success_count"] += 1
         alpha = 0.1  # Learning rate
         pattern["avg_duration"] = (1 - alpha) * pattern["avg_duration"] + alpha * duration
-        pattern["success_rate"] = self._success_count / self._operation_count
+        pattern["success_rate"] = pattern["success_count"] / pattern["count"] if pattern["count"] > 0 else 0.0
         
         # Update health status
         self._update_health_status()
@@ -605,8 +608,12 @@ class NanoTensor:
                 success = True
                 error_msg = None
                 return new_nt
-            except:
-                raise e  # Re-raise original error if recovery fails
+            except Exception as recovery_exc:
+                # Recovery also failed; raise a combined error to preserve context
+                raise RuntimeError(
+                    f"Differentiation failed, and recovery via simplify() also failed. "
+                    f"Original error: {e!r}; recovery error: {recovery_exc!r}"
+                ) from recovery_exc
         finally:
             duration = time.time() - start_time
             self._record_operation("differentiation", duration, success, error_msg)
@@ -738,16 +745,18 @@ class NanoTensor:
             error_msg = str(e)
             raise
         finally:
-            duration = time.time() - start_time
-            self._record_operation("evaluation", duration, success, error_msg)
-            
-            # Anomaly detection
+            # Anomaly detection using pattern *before* recording this operation
             if "evaluation" in self._learned_patterns:
                 pattern = self._learned_patterns["evaluation"]
                 if pattern["count"] > 10 and pattern["avg_duration"] > 0:
                     deviation = abs(duration - pattern["avg_duration"]) / pattern["avg_duration"]
                     if deviation > self._anomaly_threshold:
-                        warnings.warn(f"Anomalous evaluation detected: {duration:.4f}s vs avg {pattern['avg_duration']:.4f}s")
+                        warnings.warn(
+                            f"Anomalous evaluation detected: {duration:.4f}s vs avg {pattern['avg_duration']:.4f}s"
+                        )
+            
+            duration = time.time() - start_time
+            self._record_operation("evaluation", duration, success, error_msg)
         
     def apply_linear_coeffs(self, coeffs: Dict[str, float]):
         """

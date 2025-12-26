@@ -41,7 +41,7 @@ class TestMilitaryGradeFeatures(unittest.TestCase):
         self.nt.data[1, 1] = self.x * self.y
         
         # Differentiate
-        nt_diff = self.nt.diff(self.x)
+        self.nt.diff(self.x)
         
         # Check tracking
         self.assertGreater(self.nt._operation_count, 0)
@@ -57,7 +57,6 @@ class TestMilitaryGradeFeatures(unittest.TestCase):
         
         # First call - cache miss
         nt1 = self.nt.diff_cached('x', 1)
-        initial_misses = self.nt._cache_misses
         
         # Second call - cache hit
         nt2 = self.nt.diff_cached('x', 1)
@@ -256,7 +255,7 @@ class TestMilitaryGradeIntegration(unittest.TestCase):
         nt.generate_taylor({'k': 1.0, 'a': 0.0}, ss_value=sp.S(1))
         
         # Evaluate
-        result = nt.eval_numeric({'k': 1.1, 'a': 0.1})
+        nt.eval_numeric({'k': 1.1, 'a': 0.1})
         
         # Check health
         health = nt.health_check()
@@ -280,9 +279,25 @@ class TestMilitaryGradeIntegration(unittest.TestCase):
         nt_dx = nt.diff(x)
         nt_dy = nt.diff(y)
         
+        # Verify differentiation results
+        self.assertEqual(nt_dx.data[0], 2 * x)
+        self.assertEqual(nt_dx.data[1], y)
+        self.assertEqual(nt_dy.data[0], sp.S(1))
+        self.assertEqual(nt_dy.data[1], x)
+        
         # Evaluate
         result1 = nt.eval_numeric({'x': 2.0, 'y': 3.0})
         result2 = nt.eval_numeric({'x': 1.0, 'y': 1.0})
+        
+        # Verify evaluation results
+        self.assertIsInstance(result1, np.ndarray)
+        self.assertIsInstance(result2, np.ndarray)
+        # For x=2, y=3: [x**2 + y, x*y**2] -> [7, 18]
+        self.assertAlmostEqual(float(result1[0]), 7.0)
+        self.assertAlmostEqual(float(result1[1]), 18.0)
+        # For x=1, y=1: [x**2 + y, x*y**2] -> [2, 1]
+        self.assertAlmostEqual(float(result2[0]), 2.0)
+        self.assertAlmostEqual(float(result2[1]), 1.0)
         
         # Simplify
         nt.simplify()

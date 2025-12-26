@@ -8,7 +8,6 @@ Run this to see autonomous learning, health monitoring, and intelligent decision
 """
 
 import sympy as sp
-import numpy as np
 import time
 import sys
 
@@ -115,14 +114,14 @@ def demo_security_validation():
     # Test invalid inputs
     print("\n✗ Testing invalid input: x=15.0 (out of bounds)")
     try:
-        result = nt.eval_numeric({'x': 15.0, 'y': 2.0})
+        nt.eval_numeric({'x': 15.0, 'y': 2.0})
     except ValueError as e:
         print(f"  Caught: {e}")
     
     print("\n✗ Testing invalid input: NaN value")
     try:
-        result = nt.eval_numeric({'x': float('nan'), 'y': 2.0})
-    except ValueError as e:
+        nt.eval_numeric({'x': float('nan'), 'y': 2.0})
+    except ValueError:
         print(f"  Caught: Invalid value detected")
 
 
@@ -143,7 +142,7 @@ def demo_autonomous_recovery():
     start = time.time()
     
     try:
-        nt_dx = nt.diff(x)
+        nt.diff(x)
         elapsed = time.time() - start
         print(f"✓ Differentiation succeeded in {elapsed:.4f}s")
         
@@ -169,14 +168,14 @@ def demo_cache_performance():
     # First call - cache miss
     print("\nFirst call (cache miss):")
     start = time.time()
-    nt1 = nt.diff_cached('x', 1)
+    nt.diff_cached('x', 1)
     time1 = time.time() - start
     print(f"  Time: {time1:.6f}s")
     
     # Second call - cache hit
     print("\nSecond call (cache hit):")
     start = time.time()
-    nt2 = nt.diff_cached('x', 1)
+    nt.diff_cached('x', 1)
     time2 = time.time() - start
     print(f"  Time: {time2:.6f}s")
     
