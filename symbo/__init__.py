@@ -19,6 +19,7 @@ __organization__ = "Recursive AI Devs"
 # Core primitives and tensor
 from .primitives import AtomicPrimitives, add, mul, diff
 from .tensor import SymbolicTensor
+from .reasoning.hsws import HSWS, Concept, Subconcept, Betaconcept, DictionarySemanticEngine, SemanticEngine
 
 __all__ = [
     'AtomicPrimitives',
@@ -26,4 +27,10 @@ __all__ = [
     'add',
     'mul',
     'diff',
+    'HSWS',
+    'Concept',
+    'Subconcept',
+    'Betaconcept',
+    'DictionarySemanticEngine',
+    'SemanticEngine'
 ]
