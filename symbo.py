@@ -67,6 +67,11 @@ try:
 except ImportError:
     pa = None
 
+try:
+    import dill
+except ImportError:
+    dill = None
+
 import sympy as sp
 import numpy as np
 import torch
@@ -84,10 +89,13 @@ from code import InteractiveConsole
 from skopt import gp_minimize
 import time
 import warnings
+import math
+import pickle
+import os
 warnings.filterwarnings('ignore')
 
 # Sympy imports for specialized functions
-from sympy import symbols, Symbol, Poly, GroebnerBasis, groebner, resultant, solve, Eq, nsolve, lambdify
+from sympy import symbols, Symbol, Poly, GroebnerBasis, groebner, resultant, solve, Eq, nsolve, lambdify, cse
 from sympy.matrices import Matrix
 
 
@@ -297,7 +305,10 @@ class NanoTensor:
         self._validation_bounds: Dict[str, Tuple[float, float]] = {}
         self._auto_optimize = True
         self._anomaly_threshold = 3.0
-        
+        self._input_stats: Dict[str, Dict[str, float]] = {}  # Welford's online stats
+        self._optimized_data: Optional[Tuple[List, List]] = None  # Storage for CSE optimized form
+        self._optimized_func: Optional[Tuple[List[sp.Symbol], Any]] = None  # Cached optimized function
+
     def _init_data(self):
         """Initialize tensor with symbolic zeros"""
         self.data = np.zeros(self.shape, dtype=object)
@@ -344,6 +355,38 @@ class NanoTensor:
         
         # Update health status
         self._update_health_status()
+
+    def _update_input_stats(self, var_name: str, value: float):
+        """Update running statistics for inputs using Welford's online algorithm."""
+        if var_name not in self._input_stats:
+            self._input_stats[var_name] = {"n": 0, "mean": 0.0, "M2": 0.0}
+
+        stats = self._input_stats[var_name]
+        stats["n"] += 1
+        delta = value - stats["mean"]
+        stats["mean"] += delta / stats["n"]
+        delta2 = value - stats["mean"]
+        stats["M2"] += delta * delta2
+
+    def _check_input_anomaly(self, var_name: str, value: float) -> bool:
+        """Check for statistical anomaly (Z-score > threshold)."""
+        if var_name not in self._input_stats:
+            return False
+
+        stats = self._input_stats[var_name]
+        if stats["n"] < 10:  # Need sufficient samples
+            return False
+
+        variance = stats["M2"] / (stats["n"] - 1)
+        if variance < 1e-12:  # Avoid division by zero
+            return False
+
+        std_dev = math.sqrt(variance)
+        z_score = abs(value - stats["mean"]) / std_dev
+
+        if z_score > self._anomaly_threshold:
+            return True
+        return False
     
     def _update_health_status(self):
         """Update health status based on performance metrics (military-grade feature)."""
@@ -376,8 +419,58 @@ class NanoTensor:
             # Simplify if we have complex expressions
             if self._operation_count > 100 and self._success_count / self._operation_count < 0.9:
                 self.simplify()
+
+            # Optimize storage for faster evaluation
+            if self._operation_count % 50 == 0:
+                self.optimize_storage()
+
         except Exception:
             pass  # Silent failure - don't interfere with main operation
+
+    def optimize_storage(self):
+        """
+        Optimize expression storage using Common Subexpression Elimination (CSE).
+        This significantly speeds up numeric evaluation of large tensors.
+        """
+        try:
+            # Flatten data for CSE
+            flat_exprs = self.data.flatten().tolist()
+            replacements, reduced_exprs = cse(flat_exprs)
+            self._optimized_data = (replacements, reduced_exprs)
+            # Clear lambdify cache as we have a new optimized form
+            self._lambdify_cache.clear()
+
+            # Pre-compile the optimized function using lambdify with cse=True
+            # Note: Since we already computed cse, we can pass the result to lambdify
+            # if we reconstruct the cse=True call, or just use cse=True on original data.
+            # To be consistent with _optimized_data, we should use that.
+            # However, sympy.lambdify's cse=True recomputes it.
+            # For efficiency and correctness, let's just use lambdify with cse=True on original data
+            # and store THAT as the cached function for all symbols.
+
+            # Since we can't know which subset of symbols will be used in eval_numeric,
+            # we can only pre-compile for the full set of symvars.
+
+            vars_all = self.symvars
+            # Sort for consistency
+            vars_all = sorted(vars_all, key=lambda s: s.name)
+
+            # Compile optimized function
+            # We use cse=True which internally does what we did above
+            optimized_func = lambdify(vars_all, self.data.flatten().tolist(), modules='numpy', cse=True)
+
+            # Store in a special cache slot
+            key = tuple(sorted([v.name for v in vars_all]))
+            # We need to match the key format used in eval_numeric
+            # which depends on the input point keys.
+            # So we can't pre-fill the cache easily unless we know the input keys.
+            # But we can store it in a separate attribute.
+            self._optimized_func = (vars_all, optimized_func)
+
+        except Exception as e:
+            # If optimization fails, just don't use it
+            self._optimized_data = None
+            self._optimized_func = None
     
     def _validate_input(self, var_name: str, value: float) -> bool:
         """Validate input against bounds (military-grade security feature)."""
@@ -389,6 +482,11 @@ class NanoTensor:
         # Check for invalid values
         if np.isnan(value) or np.isinf(value):
             raise ValueError(f"Invalid value for {var_name}: {value}")
+
+        # Update statistics and check for anomalies
+        self._update_input_stats(var_name, value)
+        if self._check_input_anomaly(var_name, value):
+            warnings.warn(f"Statistical anomaly detected for {var_name}: {value} (Z-score > {self._anomaly_threshold})")
         
         return True
     
@@ -417,9 +515,101 @@ class NanoTensor:
                 "lambdify": len(self._lambdify_cache)
             },
             "validation": {
-                "bounds_set": len(self._validation_bounds)
+                "bounds_set": len(self._validation_bounds),
+                "input_stats_tracked": len(self._input_stats)
+            },
+            "optimization": {
+                "cse_enabled": self._optimized_data is not None
             }
         }
+
+    def save_brain(self, filepath: str):
+        """
+        Persist the entire NanoTensor brain state to disk.
+        Uses dill for robust serialization of SymPy objects and lambdas.
+        """
+        if dill is None:
+            # Fallback to pickle if dill is not available
+            serializer = pickle
+        else:
+            serializer = dill
+
+        try:
+            # We don't save the diff cache or lambdify cache to save space
+            # and avoid issues with unpicklable objects
+            state = {
+                "shape": self.shape,
+                "max_order": self.max_order,
+                "name": self.name,
+                "base_vars": self.base_vars,
+                "coeff_vars": self.coeff_vars,
+                "data": self.data,  # SymPy expressions are picklable
+                "fitted_coeffs": self.fitted_coeffs,
+                "metrics": {
+                    "ops": self._operation_count,
+                    "success": self._success_count,
+                    "time": self._total_compute_time,
+                    "hits": self._cache_hits,
+                    "misses": self._cache_misses
+                },
+                "experience": self._experience_buffer,
+                "patterns": self._learned_patterns,
+                "validation": self._validation_bounds,
+                "input_stats": self._input_stats,
+                "optimized_data": self._optimized_data
+            }
+
+            with open(filepath, 'wb') as f:
+                serializer.dump(state, f)
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to save brain to {filepath}: {e}")
+
+    @classmethod
+    def load_brain(cls, filepath: str) -> 'NanoTensor':
+        """Load a persisted NanoTensor brain from disk."""
+        if dill is None:
+            serializer = pickle
+        else:
+            serializer = dill
+
+        try:
+            with open(filepath, 'rb') as f:
+                state = serializer.load(f)
+
+            nt = cls(
+                shape=state["shape"],
+                max_order=state["max_order"],
+                base_vars=[v.name for v in state["base_vars"]],
+                name=state["name"]
+            )
+
+            # Restore state
+            nt.base_vars = state["base_vars"]
+            nt.coeff_vars = state["coeff_vars"]
+            nt.data = state["data"]
+            nt.fitted_coeffs = state["fitted_coeffs"]
+
+            # Restore metrics
+            metrics = state["metrics"]
+            nt._operation_count = metrics["ops"]
+            nt._success_count = metrics["success"]
+            nt._total_compute_time = metrics["time"]
+            nt._cache_hits = metrics["hits"]
+            nt._cache_misses = metrics["misses"]
+
+            # Restore learning
+            nt._experience_buffer = state["experience"]
+            nt._learned_patterns = state["patterns"]
+            nt._validation_bounds = state["validation"]
+            nt._input_stats = state.get("input_stats", {})
+            nt._optimized_data = state.get("optimized_data")
+
+            nt._update_health_status()
+            return nt
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to load brain from {filepath}: {e}")
     
     def get_agency_status(self) -> Dict[str, Any]:
         """Get agency and learning status (military-grade agency feature)."""
@@ -731,6 +921,26 @@ class NanoTensor:
             
             vars_in_point = [v for v in self.symvars if v.name in point]
             key = tuple(sorted([v.name for v in vars_in_point])) + tuple(sorted(point.keys()))
+
+            # Use pre-compiled optimized function if available and applicable
+            if self._optimized_func is not None:
+                opt_vars, opt_func = self._optimized_func
+                # Check if all required variables are present
+                # The optimized func was compiled with ALL symvars.
+                # So we just need to provide all of them.
+                # If point contains all symvars (or we assume defaults for missing?), we can use it.
+
+                # We construct args for all symvars
+                # Missing vars default to 0.0, which matches logic below
+                args = [point.get(v.name, 0.0) for v in opt_vars]
+
+                try:
+                    result_flat = opt_func(*args)
+                    return np.array(result_flat).reshape(self.shape)
+                except Exception:
+                    # Fallback if something goes wrong with optimized func
+                    pass
+
             if key not in self._lambdify_cache:
                 # Prepare functions for all elements
                 self._lambdify_cache[key] = [
