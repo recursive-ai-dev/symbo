@@ -10,6 +10,8 @@ Run this to see autonomous learning, health monitoring, and intelligent decision
 import sympy as sp
 import time
 import sys
+import warnings
+import os
 
 # Import NanoTensor from symbo.py file
 import importlib.util
@@ -236,9 +238,102 @@ def demo_agent_with_brain():
     print(f"✓ Recommendations: {agency['recommendations'][0]}")
 
 
+def demo_persistence():
+    """Demonstrate brain persistence (saving/loading)."""
+    print_section("7. Persistence (Save/Load Brain)")
+
+    filename = "agent_brain.pkl"
+
+    # 1. Create and train a brain
+    print("Training original brain...")
+    nt = NanoTensor((1,), max_order=1, base_vars=['x'])
+    x = sp.Symbol('x')
+    nt.data[0] = 2 * x
+
+    # Generate some experience
+    nt.eval_numeric({'x': 10.0})
+    nt.eval_numeric({'x': 20.0})
+
+    print(f"Original brain operations: {nt._operation_count}")
+
+    # 2. Save it
+    print(f"Saving brain to {filename}...")
+    nt.save_brain(filename)
+
+    # 3. Load into new instance
+    print("Loading brain into new instance...")
+    nt_loaded = NanoTensor.load_brain(filename)
+
+    # 4. Verify state
+    print(f"Loaded brain operations: {nt_loaded._operation_count}")
+    print(f"Loaded brain experiences: {len(nt_loaded._experience_buffer)}")
+
+    if nt._operation_count == nt_loaded._operation_count:
+        print("✓ State persistence verified!")
+    else:
+        print("✗ State mismatch!")
+
+    # Clean up
+    if os.path.exists(filename):
+        os.remove(filename)
+
+
+def demo_anomaly_detection():
+    """Demonstrate statistical anomaly detection."""
+    print_section("8. Statistical Anomaly Detection")
+
+    nt = NanoTensor((1,), max_order=1, base_vars=['x'])
+    nt.set_validation_bounds('x', -1000, 1000)
+
+    print("Training baseline statistics (mean=10, std=1)...")
+    import random
+    for _ in range(50):
+        val = random.gauss(10, 1)
+        nt.eval_numeric({'x': val})
+
+    print("Injecting anomaly (value=50, ~40 sigma)...")
+    try:
+        # This is within bounds [-1000, 1000] but statistically anomalous
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            nt.eval_numeric({'x': 50.0})
+            if w:
+                for warning in w:
+                    print(f"✓ Caught warning: {warning.message}")
+            else:
+                print("✗ Failed to detect anomaly")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def demo_optimization():
+    """Demonstrate storage optimization (CSE)."""
+    print_section("9. Advanced Optimization (CSE)")
+
+    nt = NanoTensor((10,), max_order=1, base_vars=['x'])
+    x = sp.Symbol('x')
+
+    # Create repetitive expression
+    expr = (x + 1)**10 + (x + 1)**9 + (x + 1)**8
+    for i in range(10):
+        nt.data[i] = expr
+
+    print("Original storage unoptimized.")
+    print("Running optimization...")
+    nt.optimize_storage()
+
+    if nt._optimized_data:
+        replacements, reduced = nt._optimized_data
+        print(f"✓ Optimization successful!")
+        print(f"  Replacements found: {len(replacements)}")
+        print(f"  Reduced expressions: {len(reduced)}")
+    else:
+        print("✗ Optimization failed or no common subexpressions found.")
+
+
 def demo_recommendations():
     """Demonstrate intelligent recommendations."""
-    print_section("7. Intelligent Recommendations")
+    print_section("10. Intelligent Recommendations")
     
     nt = NanoTensor((1,), max_order=2, base_vars=['x'])
     x = sp.Symbol('x')
@@ -274,6 +369,9 @@ def main():
         demo_autonomous_recovery()
         demo_cache_performance()
         demo_agent_with_brain()
+        demo_persistence()
+        demo_anomaly_detection()
+        demo_optimization()
         demo_recommendations()
         
         print("\n" + "="*70)
