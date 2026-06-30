@@ -129,7 +129,7 @@ def serialize_basis_msgpack(G) -> bytes:
     data = {
         "gens": [str(g) for g in G.gens],
         "polys": [str(p) for p in G.polys],
-        "order": G.order,
+        "order": str(G.order),
     }
     return msgpack.packb(data, use_bin_type=True)
 
@@ -394,6 +394,10 @@ class NanoTensor:
             self._health_status = "optimal"
             return
         
+        # Adjust for expected failures like bounds validation if necessary.
+        # It's better to just use regular logic but if the operation failed
+        # it was considered unsuccessful.
+
         success_rate = self._success_count / self._operation_count
         
         if success_rate >= 0.99:
@@ -656,16 +660,16 @@ class NanoTensor:
 
     @staticmethod
     def find_path_on_grid(Z: np.ndarray,
-                          start_idx: Tuple[int, int],
-                          goal_idx: Tuple[int, int],
+                          start: Tuple[int, int],
+                          goal: Tuple[int, int],
                           mode: str = "min") -> List[Tuple[int, int]]:
         """
         A* pathfinding on a 2D cost grid Z.
 
         Args:
             Z: 2D array of costs.
-            start_idx: (i, j) start index into Z.
-            goal_idx: (i, j) goal index into Z.
+            start: (i, j) start index into Z.
+            goal: (i, j) goal index into Z.
             mode: 'min' to prefer low Z (valley-following),
                   'max' to prefer high Z (ridge-following).
 
@@ -673,8 +677,8 @@ class NanoTensor:
             List of (i, j) indices representing the path.
         """
         rows, cols = Z.shape
-        (si, sj) = start_idx
-        (gi, gj) = goal_idx
+        (si, sj) = start
+        (gi, gj) = goal
 
         if not (0 <= si < rows and 0 <= sj < cols and 0 <= gi < rows and 0 <= gj < cols):
             raise ValueError("Start or goal index out of bounds for Z.")
@@ -692,14 +696,14 @@ class NanoTensor:
                     yield ni, nj
 
         open_set = []
-        heapq.heappush(open_set, (0.0, start_idx))
+        heapq.heappush(open_set, (0.0, start))
 
         came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
-        g_score = {start_idx: 0.0}
+        g_score = {start: 0.0}
 
         while open_set:
             _, current = heapq.heappop(open_set)
-            if current == goal_idx:
+            if current == goal:
                 # reconstruct path
                 path = [current]
                 while current in came_from:
@@ -713,7 +717,7 @@ class NanoTensor:
                 if tentative_g < g_score.get(nb, float("inf")):
                     came_from[nb] = current
                     g_score[nb] = tentative_g
-                    f = tentative_g + NanoTensor._heuristic(nb, goal_idx)
+                    f = tentative_g + NanoTensor._heuristic(nb, goal)
                     heapq.heappush(open_set, (f, nb))
 
         # No path found
@@ -1541,7 +1545,7 @@ class NanoTensor:
                                     n1=n1,
                                     n2=n2)
 
-        path = self.find_path_on_grid(Z, start_idx=start, goal_idx=goal, mode=mode)
+        path = self.find_path_on_grid(Z, start=start, goal=goal, mode=mode)
 
         created_fig = False
         if ax is None:
