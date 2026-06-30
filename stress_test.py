@@ -39,23 +39,19 @@ def test_serialization():
     G = sp.groebner(F, x, y)
 
     # MessagePack
-    try:
-        msg = symbo.serialize_basis_msgpack(G)
-        print("Msgpack OK, size:", len(msg))
-    except Exception as e:
-        print("Msgpack Failed:", e)
+    msg = symbo.serialize_basis_msgpack(G)
+    print("Msgpack OK, size:", len(msg))
+    assert len(msg) > 0, "MessagePack serialization failed"
 
     # Arrow
-    try:
-        arr = symbo.serialize_basis_arrow(G)
-        print("Arrow OK, size:", len(arr))
-    except Exception as e:
-        print("Arrow Failed:", e)
+    arr = symbo.serialize_basis_arrow(G)
+    print("Arrow OK, size:", len(arr))
+    assert len(arr) > 0, "Arrow serialization failed"
 
 def test_wasm():
     print("Testing WASM...")
     res = symbo.wasm_eval_expression("x**2 + y", {"x": 2.0, "y": 3.0})
-    assert res == 7.0
+    assert abs(res - 7.0) < 1e-9
 
 def test_pathfinding():
     print("Testing pathfinding...")
@@ -79,7 +75,7 @@ def test_military():
     nt.data[0] = sp.Symbol('x')**2
 
     # Do enough operations to keep health high
-    for i in range(25):
+    for _ in range(25):
         nt.eval_numeric({'x': 1})
 
     res = nt.eval_numeric({'x': 5})
@@ -106,4 +102,5 @@ def run_all():
     test_military()
     print("All basic stress tests completed!")
 
-run_all()
+if __name__ == '__main__':
+    run_all()
