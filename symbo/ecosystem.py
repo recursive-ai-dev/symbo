@@ -26,6 +26,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Tuple
 import sympy as sp
 import numpy as np
+from symbo.security import safe_sympify
 
 
 class EncryptionProvider(ABC):
@@ -415,7 +416,7 @@ class MockFortArch(EncryptionProvider):
         return str(expr).encode('utf-8')
     
     def decrypt_expression(self, encrypted: bytes) -> sp.Expr:
-        return sp.sympify(encrypted.decode('utf-8'))
+        return safe_sympify(encrypted.decode('utf-8'))
     
     def homomorphic_eval(self, encrypted: bytes, operation: str) -> bytes:
         expr = self.decrypt_expression(encrypted)

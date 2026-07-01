@@ -96,6 +96,7 @@ warnings.filterwarnings('ignore')
 
 # Sympy imports for specialized functions
 from sympy import symbols, Symbol, Poly, GroebnerBasis, groebner, resultant, solve, Eq, nsolve, lambdify, cse
+from symbo.security import safe_sympify
 from sympy.matrices import Matrix
 
 
@@ -179,8 +180,9 @@ def serialize_basis_arrow(G) -> bytes:
 def wasm_eval_expression(expr_str: str, var_values: Dict[str, float]) -> float:
     """
     Simple WASM-friendly entrypoint: parse an expression string, substitute vars, and eval.
+    Uses safe_sympify to prevent arbitrary code execution on raw string input.
     """
-    expr = sp.sympify(expr_str)
+    expr = safe_sympify(expr_str)
     subs_d = {sp.Symbol(k): v for k, v in var_values.items()}
     return float(expr.subs(subs_d).evalf())
 
@@ -214,7 +216,7 @@ def wasm_groebner_solve_json(poly_strs: List[str],
         JSON-encoded result containing basis and solutions.
     """
 
-    polys = [sp.sympify(s) for s in poly_strs]
+    polys = [safe_sympify(s) for s in poly_strs]
     vars_syms = [sp.Symbol(v) for v in var_names]
     G = groebner(polys, *vars_syms, order='lex')
     sols = solve(polys, *vars_syms, dict=True)
@@ -527,10 +529,14 @@ class NanoTensor:
         """
         Persist the entire NanoTensor brain state to disk.
         Uses dill for robust serialization of SymPy objects and lambdas.
+
+        Security Note: Both dill and pickle are vulnerable to arbitrary code execution
+        if used to deserialize untrusted data. We strictly require dill as it handles
+        SymPy lambda serialization correctly, but callers must ensure the loaded
+        file comes from a trusted source.
         """
         if dill is None:
-            # Fallback to pickle if dill is not available
-            serializer = pickle
+            raise RuntimeError("dill is required for NanoTensor.save_brain.")
         else:
             serializer = dill
 
@@ -567,9 +573,14 @@ class NanoTensor:
 
     @classmethod
     def load_brain(cls, filepath: str) -> 'NanoTensor':
-        """Load a persisted NanoTensor brain from disk."""
+        """
+        Load a persisted NanoTensor brain from disk.
+
+        Security Note: This method deserializes a pickle/dill file, which can execute
+        arbitrary code. Do not load untrusted `filepath` arguments.
+        """
         if dill is None:
-            serializer = pickle
+            raise RuntimeError("dill is required for NanoTensor.load_brain.")
         else:
             serializer = dill
 
@@ -1072,7 +1083,7 @@ class NanoTensor:
         x, y = sp.symbols('x y')
         
         # Ensure implicit_poly is in terms of x,y
-        implicit_poly = sp.sympify(implicit_poly)
+        implicit_poly = safe_sympify(implicit_poly)
         
         # Line through origin (assuming singular point at origin)
         l = y - t * x
