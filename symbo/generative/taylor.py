@@ -26,6 +26,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional, Any
 from itertools import combinations_with_replacement, product
 import json
+from symbo.security import safe_sympify
 
 
 class TaylorExpansion:
@@ -321,7 +322,7 @@ class TaylorExpansion:
         
         expansion = cls(variables, center, data["max_order"])
         if data["expansion"]:
-            expansion.expansion = sp.sympify(data["expansion"])
+            expansion.expansion = safe_sympify(data["expansion"])
             expansion._coefficient_names = data["coefficients"]
         
         return expansion

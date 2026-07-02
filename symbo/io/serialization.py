@@ -24,6 +24,7 @@ import sympy as sp
 import numpy as np
 from typing import Any, Dict, List, Optional, Union
 import json
+from symbo.security import safe_sympify
 
 try:
     import msgpack
@@ -110,7 +111,7 @@ class SymboSerializer:
         else:
             obj = json.loads(data.decode('utf-8'))
         
-        return sp.sympify(obj["string_repr"])
+        return safe_sympify(obj["string_repr"])
     
     @staticmethod
     def serialize_tensor(tensor: 'SymbolicTensor', format: str = 'arrow') -> bytes:
@@ -230,7 +231,7 @@ class SymboSerializer:
         # Fill with expressions
         for i, expr_str in enumerate(flat_data):
             idx = np.unravel_index(i, shape)
-            tensor.data[idx] = sp.sympify(expr_str)
+            tensor.data[idx] = safe_sympify(expr_str)
         
         return tensor
     

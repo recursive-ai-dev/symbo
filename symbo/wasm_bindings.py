@@ -24,6 +24,7 @@ import sympy as sp
 import numpy as np
 from typing import Dict, List, Any, Union, Optional
 import json
+from symbo.security import safe_sympify
 
 try:
     import msgpack
@@ -69,7 +70,7 @@ class WASMInterface:
         >>> print(result)  # 7.0
         """
         try:
-            expr = sp.sympify(expr_str)
+            expr = safe_sympify(expr_str)
             subs_dict = {sp.Symbol(k): v for k, v in var_values.items()}
             return float(expr.subs(subs_dict).evalf())
         except Exception as e:
@@ -95,7 +96,7 @@ class WASMInterface:
             Derivative expression as string
         """
         try:
-            expr = sp.sympify(expr_str)
+            expr = safe_sympify(expr_str)
             var_sym = sp.Symbol(var)
             deriv = sp.diff(expr, var_sym, order)
             return str(deriv)
@@ -118,7 +119,7 @@ class WASMInterface:
             Simplified expression
         """
         try:
-            expr = sp.sympify(expr_str)
+            expr = safe_sympify(expr_str)
             simplified = sp.simplify(expr)
             return str(simplified)
         except Exception as e:
@@ -142,7 +143,7 @@ class WASMInterface:
             Solutions as strings
         """
         try:
-            eq = sp.sympify(eq_str)
+            eq = safe_sympify(eq_str)
             var_sym = sp.Symbol(var)
             solutions = sp.solve(eq, var_sym)
             return [str(sol) for sol in solutions]
@@ -174,7 +175,7 @@ class WASMInterface:
             Taylor expansion info including coefficients and expression
         """
         try:
-            expr = sp.sympify(expr_str)
+            expr = safe_sympify(expr_str)
             var_sym = sp.Symbol(var)
             
             # Compute Taylor series
@@ -214,7 +215,7 @@ class WASMInterface:
             Jacobian matrix as nested list of strings
         """
         try:
-            exprs = [sp.sympify(e) for e in expr_strs]
+            exprs = [safe_sympify(e) for e in expr_strs]
             vars_syms = [sp.Symbol(v) for v in var_names]
             
             jacobian = []
@@ -288,7 +289,7 @@ class MessagePackSerializer:
         MessagePackSerializer.check_available()
         
         obj = msgpack.unpackb(data, raw=False)
-        return sp.sympify(obj["string"])
+        return safe_sympify(obj["string"])
     
     @staticmethod
     def serialize_tensor(tensor_data: np.ndarray, shape: tuple) -> bytes:
@@ -341,7 +342,7 @@ class MessagePackSerializer:
         shape = tuple(obj["shape"])
         
         # Reconstruct expressions
-        flat_exprs = [sp.sympify(s) for s in obj["data"]]
+        flat_exprs = [safe_sympify(s) for s in obj["data"]]
         tensor_data = np.array(flat_exprs, dtype=object).reshape(shape)
         
         return tensor_data, shape

@@ -22,3 +22,4 @@ pyarrow>=12.0.0
 
 # Optional web dashboard
 streamlit>=1.28.0
+dill>=0.3.0
