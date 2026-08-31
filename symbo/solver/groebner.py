@@ -22,18 +22,17 @@ Key Features:
 """
 
 import sympy as sp
-from sympy import groebner, Symbol, Poly, solve
-from typing import List, Dict, Generator, Optional, Tuple, Any, Union
+from sympy import groebner, Poly, solve
+from typing import List, Dict, Generator, Optional, Any, Union
 import json
-import time
 
 
 class GröbnerBasisState:
     """
     State object for Gröbner basis computation.
-    
+
     Tracks progress and intermediate results during computation.
-    
+
     Attributes
     ----------
     polynomials : List[sp.Expr]
@@ -49,7 +48,7 @@ class GröbnerBasisState:
     status : str
         Computation status
     """
-    
+
     def __init__(self,
                  polynomials: List[sp.Expr],
                  variables: List[sp.Symbol],
@@ -58,16 +57,16 @@ class GröbnerBasisState:
         self.polynomials = polynomials
         self.variables = variables
         self.order = order
-        
+
         self.basis: Optional[Any] = None
         self.solutions: List[Dict[sp.Symbol, sp.Expr]] = []
         self.status: str = "initialized"
         self.error: Optional[str] = None
-        
+
         # Streaming state
         self._basis_polynomials: List[sp.Expr] = []
         self._current_index: int = 0
-        
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for serialization."""
         return {
@@ -79,7 +78,7 @@ class GröbnerBasisState:
             "num_basis_polys": len(self._basis_polynomials),
             "num_solutions": len(self.solutions)
         }
-    
+
     def to_json(self) -> str:
         """Serialize state to JSON."""
         return json.dumps(self.to_dict())
@@ -88,11 +87,11 @@ class GröbnerBasisState:
 class StreamingGröbnerSolver:
     """
     Gröbner basis solver with streaming output.
-    
+
     This class computes Gröbner bases and yields intermediate results
     as they become available, making it suitable for real-time applications
     and interactive use.
-    
+
     Parameters
     ----------
     polynomials : List[sp.Expr]
@@ -103,16 +102,17 @@ class StreamingGröbnerSolver:
         Monomial ordering ('lex', 'grlex', 'grevlex')
     chunk_size : int, optional
         Number of basis polynomials to yield per chunk
-        
+
     Examples
     --------
+    >>> import sympy as sp
     >>> x, y = sp.symbols('x y')
-    >>> polys = [x**2 + y**2 - 1, x - y]
-    >>> solver = StreamingGröbnerSolver(polys, [x, y])
-    >>> for chunk in solver.stream_basis():
-    ...     print(chunk)
+    >>> solver = StreamingGröbnerSolver([x**2 + y**2 - 1, x - y], [x, y])
+    >>> [chunk["progress"]["percentage"] for chunk in solver.stream_basis()
+    ...  if chunk["type"] == "basis_chunk"]
+    [50.0, 100.0]
     """
-    
+
     def __init__(self,
                  polynomials: List[sp.Expr],
                  variables: List[sp.Symbol],
@@ -121,38 +121,38 @@ class StreamingGröbnerSolver:
         """Initialize streaming Gröbner solver."""
         self.state = GröbnerBasisState(polynomials, variables, order)
         self.chunk_size = chunk_size
-        
+
     def compute_basis(self) -> None:
         """
         Compute Gröbner basis (non-streaming).
-        
+
         This performs the full computation and stores results in state.
         """
         try:
             self.state.status = "computing"
-            
+
             # Compute Gröbner basis
             G = groebner(
                 self.state.polynomials,
                 *self.state.variables,
                 order=self.state.order
             )
-            
+
             self.state.basis = G
             self.state._basis_polynomials = list(G.polys)
             self.state.status = "completed"
-            
+
         except Exception as e:
             self.state.status = "error"
             self.state.error = str(e)
             raise
-    
+
     def stream_basis(self) -> Generator[Dict[str, Any], None, None]:
         """
         Stream Gröbner basis computation results.
-        
+
         Yields chunks of basis polynomials as they are processed.
-        
+
         Yields
         ------
         Dict[str, Any]
@@ -160,41 +160,43 @@ class StreamingGröbnerSolver:
             - type: "basis_chunk" or "completion"
             - items: list of polynomial dictionaries
             - progress: current progress info
-            
+
         Examples
         --------
-        >>> for chunk in solver.stream_basis():
-        ...     if chunk["type"] == "basis_chunk":
-        ...         for item in chunk["items"]:
-        ...             print(f"Basis poly: {item['poly_str']}")
+        >>> import sympy as sp
+        >>> x, y = sp.symbols('x y')
+        >>> solver = StreamingGröbnerSolver([x + y - 2, x - y], [x, y])
+        >>> [item["poly_str"] for chunk in solver.stream_basis()
+        ...  if chunk["type"] == "basis_chunk" for item in chunk["items"]]
+        ["Poly(x - 1, x, y, domain='ZZ')", "Poly(y - 1, x, y, domain='ZZ')"]
         """
         # First compute the basis
         self.compute_basis()
-        
+
         if self.state.status == "error":
             yield {
                 "type": "error",
                 "error": self.state.error
             }
             return
-        
+
         # Stream the basis polynomials in chunks
         total = len(self.state._basis_polynomials)
-        
+
         for start_idx in range(0, total, self.chunk_size):
             end_idx = min(start_idx + self.chunk_size, total)
             chunk_polys = self.state._basis_polynomials[start_idx:end_idx]
-            
+
             items = []
             for idx, poly in enumerate(chunk_polys, start=start_idx):
                 items.append({
                     "index": idx,
                     "poly_str": str(poly),
-                    "degree": poly.as_poly(*self.state.variables).total_degree() 
+                    "degree": poly.as_poly(*self.state.variables).total_degree()
                            if hasattr(poly, 'as_poly') else None,
                     "variables": [str(v) for v in self.state.variables]
                 })
-            
+
             yield {
                 "type": "basis_chunk",
                 "items": items,
@@ -204,23 +206,23 @@ class StreamingGröbnerSolver:
                     "percentage": (end_idx / total * 100) if total > 0 else 100
                 }
             }
-        
+
         # Signal completion
         yield {
             "type": "completion",
             "total_basis_polynomials": total,
             "status": self.state.status
         }
-    
+
     def solve_system(self) -> List[Dict[sp.Symbol, sp.Expr]]:
         """
         Solve polynomial system using the Gröbner basis.
-        
+
         Returns
         -------
         List[Dict[sp.Symbol, sp.Expr]]
             List of solutions (may be empty for inconsistent systems)
-            
+
         Notes
         -----
         - Returns empty list if system is inconsistent (contains 1 in basis)
@@ -229,32 +231,32 @@ class StreamingGröbnerSolver:
         """
         if self.state.basis is None:
             self.compute_basis()
-        
+
         try:
             # Check if system is inconsistent (1 in basis)
             if any(p == 1 for p in self.state._basis_polynomials):
                 self.state.solutions = []
                 return []
-            
+
             # Attempt to solve
             solutions = solve(
                 self.state.polynomials,
                 self.state.variables,
                 dict=True
             )
-            
+
             self.state.solutions = solutions
             return solutions
-            
+
         except Exception as e:
             # Handle cases with infinite solutions or other issues
-            self.state.error = f"Solution computation failed: {str(e)}"
+            self.state.error = f"Solution computation failed: {e!s}"
             return []
-    
+
     def stream_solutions(self) -> Generator[Dict[str, Any], None, None]:
         """
         Stream solutions as they are found.
-        
+
         Yields
         ------
         Dict[str, Any]
@@ -264,7 +266,7 @@ class StreamingGröbnerSolver:
         """
         # Compute solutions
         solutions = self.solve_system()
-        
+
         if not solutions:
             # Check for special cases
             if self.state.error:
@@ -285,7 +287,7 @@ class StreamingGröbnerSolver:
                     "basis": [str(p) for p in self.state._basis_polynomials]
                 }
             return
-        
+
         # Stream individual solutions
         for idx, sol in enumerate(solutions):
             yield {
@@ -294,26 +296,26 @@ class StreamingGröbnerSolver:
                 "solution": {str(k): str(v) for k, v in sol.items()},
                 "is_real": self._check_real_solution(sol)
             }
-        
+
         # Completion
         yield {
             "type": "completion",
             "total_solutions": len(solutions)
         }
-    
+
     def _check_real_solution(self, sol: Dict[sp.Symbol, sp.Expr]) -> bool:
         """Check if a solution contains only real values."""
         try:
             for val in sol.values():
                 # Check if value has negligible imaginary part
                 if hasattr(val, 'as_real_imag'):
-                    real, imag = val.as_real_imag()
+                    _, imag = val.as_real_imag()
                     if abs(imag) > 1e-10:
                         return False
             return True
-        except:
+        except Exception:
             return False
-    
+
     def get_state(self) -> GröbnerBasisState:
         """Get current computation state."""
         return self.state
@@ -322,10 +324,10 @@ class StreamingGröbnerSolver:
 class RealTimeGröbnerSolver(StreamingGröbnerSolver):
     """
     Real-time Gröbner solver with progress callbacks.
-    
+
     Extends StreamingGröbnerSolver with callback support for
     progress monitoring in interactive applications.
-    
+
     Parameters
     ----------
     polynomials : List[sp.Expr]
@@ -339,7 +341,7 @@ class RealTimeGröbnerSolver(StreamingGröbnerSolver):
     progress_callback : callable, optional
         Function called with progress updates
     """
-    
+
     def __init__(self,
                  polynomials: List[sp.Expr],
                  variables: List[sp.Symbol],
@@ -349,14 +351,14 @@ class RealTimeGröbnerSolver(StreamingGröbnerSolver):
         """Initialize real-time solver."""
         super().__init__(polynomials, variables, order, chunk_size)
         self.progress_callback = progress_callback
-    
+
     def stream_basis(self) -> Generator[Dict[str, Any], None, None]:
         """Stream basis with progress callbacks."""
         for chunk in super().stream_basis():
             # Call progress callback if provided
             if self.progress_callback and "progress" in chunk:
                 self.progress_callback(chunk["progress"])
-            
+
             yield chunk
 
 
@@ -366,7 +368,7 @@ def solve_with_groebner(polynomials: List[sp.Expr],
                        stream: bool = False) -> Union[List[Dict], Generator]:
     """
     Convenience function to solve polynomial system using Gröbner bases.
-    
+
     Parameters
     ----------
     polynomials : List[sp.Expr]
@@ -377,21 +379,21 @@ def solve_with_groebner(polynomials: List[sp.Expr],
         Monomial ordering
     stream : bool
         If True, return generator for streaming; else return list
-        
+
     Returns
     -------
     Union[List[Dict], Generator]
         Solutions (as list if stream=False, generator if stream=True)
-        
+
     Examples
     --------
+    >>> import sympy as sp
     >>> x, y = sp.symbols('x y')
-    >>> polys = [x**2 - 1, x + y]
-    >>> sols = solve_with_groebner(polys, [x, y])
-    >>> print(sols)
+    >>> solve_with_groebner([x**2 - 1, x + y], [x, y])
+    [{x: -1, y: 1}, {x: 1, y: -1}]
     """
     solver = StreamingGröbnerSolver(polynomials, variables, order)
-    
+
     if stream:
         return solver.stream_solutions()
     else:
@@ -402,14 +404,14 @@ def handle_infinite_solutions(basis_polynomials: List[sp.Expr],
                               variables: List[sp.Symbol]) -> Dict[str, Any]:
     """
     Analyze and describe systems with infinite solutions.
-    
+
     Parameters
     ----------
     basis_polynomials : List[sp.Expr]
         Gröbner basis polynomials
     variables : List[sp.Symbol]
         System variables
-        
+
     Returns
     -------
     Dict[str, Any]
@@ -431,12 +433,12 @@ def handle_infinite_solutions(basis_polynomials: List[sp.Expr],
                     if exp > 0:
                         leading_vars.add(variables[i])
                         break
-            except:
+            except Exception:
                 pass
-    
+
     # Free variables are those not leading
     free_vars = [v for v in variables if v not in leading_vars]
-    
+
     return {
         "has_infinite_solutions": len(free_vars) > 0,
         "dimension": len(free_vars),
@@ -449,8 +451,8 @@ def handle_infinite_solutions(basis_polynomials: List[sp.Expr],
 
 __all__ = [
     'GröbnerBasisState',
-    'StreamingGröbnerSolver',
     'RealTimeGröbnerSolver',
-    'solve_with_groebner',
+    'StreamingGröbnerSolver',
     'handle_infinite_solutions',
+    'solve_with_groebner',
 ]
