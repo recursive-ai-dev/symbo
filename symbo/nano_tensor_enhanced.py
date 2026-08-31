@@ -451,8 +451,8 @@ class MilitaryGradeNanoTensor:
                         # Check for anomalies
                         if self.agency.detect_anomaly(operation, duration):
                             warnings.warn(
-                                f"Anomalous operation detected: {operation.value} "
-                                f"took {duration:.4f}s",
+                                f"Operation-time anomaly detected: {operation.value} "
+                                f"took {duration:.3g}s",
                                 stacklevel=2,
                             )
 

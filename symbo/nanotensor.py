@@ -1206,8 +1206,10 @@ class NanoTensor:
                     deviation = abs(duration - pattern["avg_duration"]) / pattern["avg_duration"]
                     if deviation > self._anomaly_threshold:
                         warnings.warn(
-                            f"Anomalous evaluation detected: {duration:.4f}s "
-                            f"vs avg {pattern['avg_duration']:.4f}s",
+                            f"Evaluation-time anomaly detected: {duration:.3g}s "
+                            f"vs learned average {pattern['avg_duration']:.3g}s "
+                            f"(deviation {deviation:.1f}x > threshold "
+                            f"{self._anomaly_threshold})",
                             stacklevel=2,
                         )
 
