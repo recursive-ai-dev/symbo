@@ -93,8 +93,16 @@ result = T + T2
 scaled = T * 2
 
 # Differentiation
-x = sp.Symbol('x')
+x, y = sp.symbols('x y')
 dT = T.diff(x)
+
+# Construct from expressions, and contract with @
+A = SymbolicTensor.from_nested([[x, 1], [y, x * y]], name="A")
+B = SymbolicTensor.from_matrix(sp.Matrix([[1, 2], [3, 4]]), name="B")
+AB = A @ B                       # same as A.contract(B, (1,), (0,))
+
+# Numeric evaluation over a whole tensor at once
+values = B.eval_numeric({x: 1.0, y: 2.0})
 ```
 
 **Key Features:**
@@ -103,6 +111,18 @@ dT = T.diff(x)
 - Symbolic arithmetic
 - Differentiation
 - Numeric evaluation
+
+**Notes:**
+- `add`, `sub`, `mul`, `div`, `outer_product`, `diff`, `subs`, `simplify` and the
+  operators return **new** tensors; nothing is mutated in place (this differs from
+  `NanoTensor.diff`/`simplify`, which update the tensor you called them on).
+- Shapes are validated on construction and on every binary operation, so a
+  mismatched `T + T2` raises `ValueError` instead of broadcasting.
+- `eval_numeric` is strict: every free symbol of the tensor must appear in the
+  substitution mapping, otherwise it raises `KeyError` rather than evaluating
+  partially. The result is an `object` ndarray shaped like the tensor.
+- `SymbolicTensor` has no `__eq__`; compare with
+  `sp.simplify(A.to_matrix() - B.to_matrix()) == 0` or `SymboSerializer.verify_equivalence`.
 
 ### 3. Taylor Expansion Core (`generative/taylor.py`)
 
@@ -122,19 +142,19 @@ taylor = TaylorExpansion(
     max_order=2
 )
 
-# Generate expansion
+# Generate the symbolic ansatz
 poly = taylor.generate("g")
-# Result: g_0 + g_x*x + g_y*y + g_xx*x²/2 + g_xy*x*y + g_yy*y²/2
+# Result: g_0 + g_x*x + g_y*y + g_x_x*x**2/2 + g_x_y*x*y + g_y_y*y**2/2
+taylor.coefficient_names        # ('g_0', 'g_x', 'g_y', 'g_x_x', 'g_x_y', 'g_y_y')
 
-# Convert to policy function
-coeffs = {'g_x': 0.5, 'g_y': 0.3, 'g_xx': -0.1}
+# Supply every coefficient the ansatz declares
+coeffs = {name: float(i) for i, name in enumerate(taylor.coefficient_names)}
 policy = taylor.to_policy_function(coeffs)
+value = policy(x=1.0, y=0.5)             # keyword arguments, one per variable
 
-# Evaluate
-value = policy(x=1.0, y=0.5)
-
-# WASM export
-json_str = taylor.to_wasm_json()
+# WASM export: coefficient_map gives the multi-index per name, coefficient_values
+# the numbers, so a browser never has to parse a SymPy expression
+payload = taylor.to_wasm_json()
 ```
 
 **Key Features:**
@@ -143,6 +163,20 @@ json_str = taylor.to_wasm_json()
 - Symbolic policy functions
 - WASM serialization
 - Fast compiled evaluation
+
+**Notes:**
+- Coefficient names join the differentiation variables with a single underscore:
+  the second derivative w.r.t. `x` is `g_x_x`, *not* `g_xx`. `generate_taylor` on
+  `NanoTensor` uses the same convention, and the `symbol` prefix you pass
+  (`"g"` above) only names the family.
+- `generate()` must run before `coefficient_names`, `to_policy_function()` or
+  `to_wasm_json()`; each raises a `RuntimeError` that says so.
+- The factorial is already divided out, so `coefficient(g_x_x)` is `x**2/2` and a
+  coefficient value is the *derivative value* itself.
+- `substitute_coefficients(values)` returns a new expansion; pass `apply=True` to
+  update `self.expansion` in place.
+- `PolicyFunction` is callable with keywords only and keeps exact SymPy numbers
+  available (`policy.expression`); `policy.coefficients` is the mapping you passed.
 
 ### 4. Gröbner Basis Solver (`solver/groebner.py`)
 
@@ -189,31 +223,44 @@ for solution in solver.stream_solutions():
 
 Full second-order perturbation analysis for dynamical systems.
 
+The solver needs a *complete* model: one equation per endogenous variable, with
+the lead variables named `*_next`. Writing a single Euler equation is not enough —
+the solver reports the system as under-determined rather than inventing a solution.
+
 **Usage:**
 ```python
 from symbo.analytics.perturbation import SecondOrderPerturbation, perturbation_solve
 import sympy as sp
 
-# Define system
-k, c, a = sp.symbols('k c a')  # state, control, shock
-alpha, beta, delta = sp.symbols('alpha beta delta')
+# state k, control c, exogenous shock a (a log-deviation, so TFP is exp(a))
+alpha, beta, delta, rho = sp.symbols('alpha beta delta rho')
+k, c, a = sp.symbols('k c a')
+kp, cp, ap = sp.symbols('k_next c_next a_next')
 
-# Euler equation for RBC model
-euler = c**(-1) - beta * c_next**(-1) * (alpha * a * k**(alpha-1) + 1 - delta)
+equations = [
+    # Euler equation
+    c**(-1) - beta * cp**(-1) * (alpha * sp.exp(ap) * kp**(alpha - 1) + 1 - delta),
+    # resource constraint
+    alpha * sp.exp(a) * k**alpha + (1 - delta) * k - c - kp,
+    # law of motion of the shock
+    ap - rho * a,
+]
+params = {alpha: 0.36, beta: 0.99, delta: 0.08, rho: 0.9}
 
-# Solve
-solution = perturbation_solve(
-    equations=[euler],
-    state_vars=[k],
-    control_vars=[c],
-    shock_vars=[a],
-    parameters={alpha: 0.3, beta: 0.96, delta: 0.1},
-    order=2
-)
+solver = SecondOrderPerturbation(equations, [k], [c], [a], params,
+                                shock_persistence={a: rho})
+print(solver.compute_steady_state())        # {k: 8.708..., c: 0.0879..., a: 0.0}
+print(solver.determined, solver.n_effective_equations)   # True 2  (preflight check)
 
-print(f"Steady state: {solution.steady_state}")
-print(f"First-order coefficients: {solution.first_order}")
-print(f"Second-order coefficients: {solution.second_order}")
+solution = solver.solve(order=2, variance=1.0, verify_at=(1e-3, 1e-2, 1e-1))
+print(solution.diagnostics["determined"], solution.diagnostics["residual_h0.001"])
+print(solution.coefficients['g_k_a'])        # 12.2467...
+print(solution.diagnostics['residual_h0.001'])
+print(solution.policy_expression('c'))       # the c policy as a SymPy expression
+
+# or one-shot, without diagnostics:
+quick = perturbation_solve(equations, [k], [c], [a], params,
+                           shock_persistence={a: rho}, order=1)
 ```
 
 **Key Features:**
@@ -222,6 +269,23 @@ print(f"Second-order coefficients: {solution.second_order}")
 - Risk/variance corrections
 - Policy function generation
 - Coefficient solving
+
+**Notes:**
+- `variance` is the shock variance used for the second-order risk correction: a
+  scalar applies to every shock, a `{shock: value}` dict per shock, `None` leaves
+  the correction symbolic. `solution.risk_corrections['h_c_sigma_sigma']` is half of
+  `g_c_a_a`, and the corrections are linear in the variance.
+- `verify_at` (scalar or sequence of perturbation scales) fills `solution.diagnostics`
+  with `residual_h<scale>` and `scaling_exponent`; residuals are what makes a
+  solution trustworthy, so prefer it over trusting the linear algebra.
+- `policy_functions` and `risk_corrections` are keyed by **string** variable name,
+  while `first_order`/`second_order`/`coefficients` are keyed by the SymPy symbol
+  name you gave the derivative (`g_k_a`). `coefficients` is the read-only merged
+  view of the two orders.
+- `shock_persistence` values may be numbers or symbols that also appear in
+  `parameters` (resolved automatically).
+- A solve that cannot be verified logs a warning and reports the residual as
+  `None`; it never silently omits the diagnostic.
 
 ### 6. A* Pathfinding (`reasoning/a_star.py`)
 
@@ -285,10 +349,14 @@ expr = x**2 * sp.sin(y) + sp.exp(x*z)
 tree = DerivativeTree(expr, [x, y, z])
 tree.build(max_depth=2)
 
-# Get influence ranking
+# Get influence ranking (pass an evaluation point for meaningful numbers)
+tree = derivative_tree(expr, [x, y, z], evaluation_point={x: 1.0, y: 0.5, z: 0.0})
 ranking = tree.get_influence_ranking()
 for var, score in ranking:
     print(f"{var}: {score}")
+
+# ... or the path-independent first-order sensitivities
+print(tree.direct_sensitivities())
 
 # Export to Graphviz
 tree.export_graphviz("tree.dot")
@@ -306,6 +374,18 @@ print(tree.visualize_influence())
 - Graphviz export
 - JSON export for web
 - Chain rule tracking
+
+**Notes:**
+- Pass `evaluation_point=` if you want numbers: without it each edge weight falls
+  back to an operation-count *complexity* proxy, which compares structure rather
+  than sensitivity. Keys may be symbols or names.
+- `get_influence_ranking()` sums over every path from the target to the variable,
+  so a variable that appears deep in the graph is counted once per path. Use
+  `direct_sensitivities()` for the plain `|df/dv|` ranking.
+- `export_graphviz(path)` writes DOT directly (no `graphviz`/`pydot` install
+  needed) and returns the path it wrote.
+- Nodes are identified by their content (`type:label:expression`), so repeated
+  derivatives of the same expression share one node instead of duplicating it.
 
 ### 8. WASM Bindings (`wasm_bindings.py`)
 
@@ -385,20 +465,41 @@ Abstract interfaces for integration with FortArch, Topo, Chrono, and Morpho.
 
 **Usage:**
 ```python
-from symbo.ecosystem import EcosystemBridge, MockChrono
+from symbo.ecosystem import (
+    EcosystemBridge, MockChrono, MockFortArch, MockMorpho, MockTopo,
+)
 import sympy as sp
 
-# Create bridge with components
+x, y = sp.symbols('x y')
+
+# Any subset of the four providers can be wired in; each bridge method names the
+# provider it needs when one is missing.
 bridge = EcosystemBridge(
-    temporal=MockChrono()
+    encryption=MockFortArch(),
+    topology=MockTopo(),
+    temporal=MockChrono(),
+    transformation=MockMorpho(),
 )
 
-# Use integrated functionality
-x, y = sp.symbols('x y')
-dynamics = {x: y, y: -x}  # Simple oscillator
-state = {x: 1.0, y: 0.0}
+# Chrono: integrate dx/dt = rhs, one entry per state variable
+trajectory = bridge.propagate_forward({x: 1.0, y: 0.0}, {x: y, y: -x},
+                                     time_horizon=1.0, dt=0.05)
+exponents = MockChrono().compute_lyapunov_exponents({x: y, y: -x}, {x: 0.0, y: 0.0})
 
-trajectory = bridge.propagate_forward(state, dynamics, time_horizon=10.0)
+# Topo: critical points and homology of the expression's zero set
+topo = MockTopo(resolution=81)
+print(topo.compute_manifold_topology(x**2 + y**2 - 1, [x, y])['betti_numbers'])
+print(topo.find_critical_points(x**3 - 3*x, [x]))
+
+# Morpho: named transformations of an expression
+morpho = MockMorpho()
+print(morpho.available())                       # 17 transformations
+print(morpho.morpho_transform((x + 1)**2, 'expand'))
+print(morpho.morpho_transform(x**3, 'diff', {'var': x, 'order': 2}))
+print(morpho.generate_variants(sp.sin(x) + sp.cos(y), n_variants=4))
+
+# FortArch: round-trip an expression through the (mock) encrypting provider
+print(bridge.secure_compute(x + x, 'simplify'))
 ```
 
 **Key Features:**
@@ -408,19 +509,84 @@ trajectory = bridge.propagate_forward(state, dynamics, time_horizon=10.0)
 - Future-ready architecture
 - Clear separation of concerns
 
+**Notes:**
+- Provider arguments are positional-keyword on purpose
+  (`chrono_propagate(symbolic_state, dynamics, time_horizon, dt=0.01)`): *state
+  first, then the dynamics map*. Swapping them is the easiest way to get a
+  nonsense trajectory, so the argument names are part of the contract.
+- `EcosystemBridge.__init__` checks each provider with `isinstance` against its
+  ABC and raises `TypeError` naming the methods it still owes.
+- `MockTopo` is numeric: it samples the expression on a grid, so
+  `compute_manifold_topology` reports `method="numeric-grid"` alongside
+  `components`, `betti_numbers`, `genus`, `resolution` and `bounds`. Contour
+  topology uses a marching-segments crossing graph, which is why nested circles
+  correctly give `b1 == 2`.
+- `MockMorpho.morpho_transform` takes its parameters as **one dict**
+  (`{'var': x, 'order': 2}`); transformations with required parameters raise
+  `ValueError` listing what is missing. `TRANSFORMATIONS` has 17 entries.
+- `MockMorpho.learn_transformation(source, target)` returns the matching
+  registered transformation, falling back to a fitted affine map.
+
+## Package layout, extras and the CLI
+
+`symbo` is a normal installable package (`pyproject.toml`); the engine core lives in
+`symbo/nanotensor.py` and each module above is a submodule of the package:
+
+```
+symbo/
+  __init__.py        re-exported public API (50 names), __version__
+  __main__.py        python -m symbo / the `symbo` console script
+  nanotensor.py      NanoTensor, deriv_tree, SymbolicTrainer, HybridTrainer,
+                     KnowledgeBase, WASM helpers, basis serialisation
+  tensor.py primitives.py security.py demos.py _optional.py ecosystem.py
+  analytics/{perturbation,explain}.py generative/taylor.py solver/groebner.py
+  reasoning/{a_star,hsws}.py io/serialization.py wasm_bindings.py
+```
+
+Only `sympy`, `numpy` and `networkx` are required. Everything else is an extra, and
+a missing extra produces one actionable `MissingOptionalDependency` (an
+`ImportError` subclass) that names the extra to install:
+
+| extra | provides |
+|---|---|
+| `viz` | `plot_contour`, `plot_surface`, `plot_grid_with_path`, demo plots |
+| `io` | msgpack/Arrow persistence, `SymboSerializer`, `save_brain`/`load_brain` |
+| `neuro` | `HybridTrainer.make_loader`, `HybridTrainer.torch_fit` |
+| `opt` | Gaussian-process order search in `HybridTrainer.symbolic_regression` |
+| `kb` | `kanren` relational queries in `KnowledgeBase` (pure-python fallback exists) |
+| `dashboard` | `python -m symbo --dashboard` |
+
+```bash
+pip install -e ".[dev]"                     # core + pytest/ruff
+pip install -e ".[viz,io,opt,kb,dev]"       # everything except torch
+pip install -e ".[all]"                     # including torch
+
+python -m symbo --check                     # environment / feature report
+python -m symbo --demo rbc|kamke|bench|pipeline
+python -m symbo --repl                      # REPL over a fitted tensor
+python -m symbo --dashboard                 # needs the dashboard extra
+symbo --check                               # same, via the console script
+```
+
+`symbo.demos` holds the four entry points above; `--check` is the fastest way to see
+which optional features your interpreter can actually use.
+
 ## Testing
 
-Run tests:
 ```bash
-# Unit tests
-python -m unittest tests.test_primitives -v
-
-# Integration test
-python -c "
-from symbo import *
-print('All imports successful')
-"
+python -m pytest                       # the whole suite (testpaths = tests)
+python -m pytest -q -m "not slow"       # skip the multi-second symbolic solves
+python -m pytest -q -m torch            # only the neuro-extra tests
+python -m pytest --doctest-modules symbo -q   # every docstring example
+python -m ruff check symbo tests demo_military_grade.py stress_test.py   # lint (line-length 110, E/F/W/B/C4/SIM/RUF)
 ```
+
+Tests never require an optional dependency: each extra-gated test either uses
+`pytest.importorskip` or asserts the *fallback* behaviour, so the suite is green on
+a bare `pip install -e ".[dev]"` and greener still with the extras installed.
+`tests/conftest.py` exposes the shared RBC model fixture. The CI workflow
+(`.ci/ci.yml`, to be moved to `.github/workflows/`) runs lint, a core-only matrix on the supported Python
+floor and ceiling, an extras job, an allowed-failure torch job and a wheel build.
 
 ## Performance Considerations
 

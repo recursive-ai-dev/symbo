@@ -1,5 +1,10 @@
 # Military-Grade NanoTensor Implementation Summary
 
+> **Historical document.** Written for the pre-packaging layout, when the engine
+> lived in a single root `symbo.py`. The repository is now the `symbo` package
+> (`symbo/nanotensor.py` holds the engine); paths below have been updated, the
+> narrative is left as it was written. See `HANDOFF.md` for the current state.
+
 ## Mission: Make NanoTensor Military-Grade with Agency Capabilities
 
 **Status**: ✅ **COMPLETE - Mission Accomplished**
@@ -22,7 +27,7 @@ Created a system that acts as a **computational brain** - something you can copy
 
 | File | Type | Lines | Description |
 |------|------|-------|-------------|
-| `symbo.py` | Modified | +293 | Enhanced NanoTensor with military-grade features |
+| `symbo/nanotensor.py` | Modified | +293 | Enhanced NanoTensor with military-grade features |
 | `symbo/nano_tensor_enhanced.py` | Created | 683 | Standalone reference implementation |
 | `tests/test_military_grade_nanotensor.py` | Created | 339 | Comprehensive test suite (17 tests) |
 | `docs/MILITARY_GRADE_NANOTENSOR.md` | Created | 474 | Complete technical documentation |
