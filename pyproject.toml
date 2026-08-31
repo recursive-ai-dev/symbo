@@ -1,0 +1,156 @@
+[build-system]
+# `license = "Apache-2.0"` below is the PEP 639 SPDX string, which needs
+# setuptools >= 77; `pip install .` picks this up through build isolation.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "symbo"
+version = "0.2.0"
+description = "Hybrid generative symbolic reasoning engine: n-dimensional symbolic tensors, Taylor policy functions, Groebner solving, perturbation analysis and explainability"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "Damien Davison" },
+    { name = "Michael Maillet" },
+    { name = "Sacha Davison" },
+    { name = "Recursive AI Devs" },
+]
+keywords = [
+    "symbolic-math",
+    "computer-algebra",
+    "sympy",
+    "taylor-expansion",
+    "groebner-basis",
+    "perturbation-methods",
+    "neuro-symbolic",
+    "explainability",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
+# The engine core needs only these three packages; everything else is an extra.
+dependencies = [
+    "sympy>=1.12",
+    "numpy>=1.24.0",
+    "networkx>=3.0",
+]
+
+[project.optional-dependencies]
+# MessagePack / Apache Arrow / dill persistence for NanoTensor and tensors.
+io = [
+    "msgpack>=1.0.5",
+    "pyarrow>=12.0.0",
+    "dill>=0.3.0",
+]
+# Contour/surface visualisation of symbolic landscapes.
+viz = [
+    "matplotlib>=3.7.0",
+    "plotly>=5.14.0",
+]
+# Neuro-symbolic coefficient training (HybridTrainer.torch_fit / make_loader).
+neuro = [
+    "torch>=2.0.0",
+]
+# Gaussian-process search over Taylor orders (HybridTrainer.symbolic_regression).
+opt = [
+    "scikit-optimize>=0.9.0",
+]
+# Relational queries in KnowledgeBase (a pure-python fallback exists without it).
+kb = [
+    "kanren>=0.2.3",
+]
+# Interactive dashboard (python -m symbo --dashboard).
+dashboard = [
+    "streamlit>=1.28.0",
+]
+all = [
+    "msgpack>=1.0.5",
+    "pyarrow>=12.0.0",
+    "dill>=0.3.0",
+    "matplotlib>=3.7.0",
+    "plotly>=5.14.0",
+    "torch>=2.0.0",
+    "scikit-optimize>=0.9.0",
+    "kanren>=0.2.3",
+    "streamlit>=1.28.0",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/recursive-ai-dev/symbo"
+Repository = "https://github.com/recursive-ai-dev/symbo"
+Documentation = "https://github.com/recursive-ai-dev/symbo/tree/main/docs"
+Issues = "https://github.com/recursive-ai-dev/symbo/issues"
+
+[project.scripts]
+symbo = "symbo.__main__:main"
+
+[tool.setuptools]
+# PyInstaller and the docs reference symbo/nanotensor.py; keep every subpackage.
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["symbo*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# Lets `pytest` work straight from a git checkout, without an editable install.
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: tests that take more than a few seconds (deselect with '-m \"not slow\"')",
+    "torch: tests that require the optional torch extra",
+    "viz: tests that require the optional matplotlib/plotly extras",
+    "opt: tests that require the optional scikit-optimize extra",
+    "kb: tests that require the optional kanren extra",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:sympy.*",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is handled by formatting, not linting
+    "SIM108",
+    "RUF001",  # ambiguous unicode (Greek letters in math docstrings are deliberate)
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ modules exist to re-export their submodules' public API.
+"symbo/**/__init__.py" = ["F401", "I001"]
+"tests/*" = ["B011"]
+
+[tool.coverage.run]
+source = ["symbo"]
+omit = ["symbo/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

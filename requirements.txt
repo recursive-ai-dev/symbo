@@ -1,25 +1,39 @@
-# Core symbolic and numeric computation
+# ---------------------------------------------------------------------------
+# Symbo dependency sets
+#
+# The engine core (NanoTensor, tensors, Taylor solver, Groebner solver,
+# perturbation, explainability, A*) needs only the three packages below.
+# Everything further down buys an optional feature; see the matching extras in
+# pyproject.toml, e.g.  pip install '.[viz]'  or  pip install '.[all]'.
+# ---------------------------------------------------------------------------
+
+# Core symbolic and numeric computation (required)
 sympy>=1.12
 numpy>=1.24.0
-torch>=2.0.0
-
-# Optimization
-scikit-optimize>=0.9.0
-
-# Logic programming
-kanren>=0.2.3
-
-# Graph and network analysis
 networkx>=3.0
 
-# Plotting and visualization
+# Serialization and persistence           -> extra: io
+msgpack>=1.0.5
+pyarrow>=12.0.0
+dill>=0.3.0
+
+# Plotting and visualization               -> extra: viz
 matplotlib>=3.7.0
 plotly>=5.14.0
 
-# Optional serialization (for MessagePack and Arrow support)
-msgpack>=1.0.5
-pyarrow>=12.0.0
+# Neuro-symbolic coefficient training    -> extra: neuro
+torch>=2.0.0
 
-# Optional web dashboard
+# GP search over Taylor orders           -> extra: opt
+scikit-optimize>=0.9.0
+
+# Relational knowledge-base queries      -> extra: kb
+kanren>=0.2.3
+
+# Interactive dashboard                  -> extra: dashboard
 streamlit>=1.28.0
-dill>=0.3.0
+
+# Development                            -> extra: dev
+pytest>=7.4
+pytest-cov>=4.1
+ruff>=0.4
