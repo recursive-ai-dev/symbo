@@ -29,8 +29,7 @@ The primitives are organized into categories:
 
 import sympy as sp
 import numpy as np
-from typing import Union, List, Tuple, Dict, Any, Optional
-from sympy import Symbol, Expr, Matrix, Poly
+from typing import Union, List, Tuple, Dict, Optional
 
 
 # Type aliases for clarity
@@ -42,82 +41,82 @@ TensorLike = Union[np.ndarray, List]
 class AtomicPrimitives:
     """
     Container class for atomic computational primitives.
-    
+
     These operations form the foundation of all higher-level Symbo functionality.
     """
-    
+
     # ==================== Algebraic Primitives ====================
-    
+
     @staticmethod
     def symbolic_add(a: SymbolicExpr, b: SymbolicExpr) -> sp.Expr:
         """
         Symbolic addition with automatic simplification.
-        
+
         Parameters
         ----------
         a, b : SymbolicExpr
             Symbolic expressions to add
-            
+
         Returns
         -------
         sp.Expr
             Simplified sum a + b
         """
         return sp.simplify(sp.Add(a, b))
-    
+
     @staticmethod
     def symbolic_mul(a: SymbolicExpr, b: SymbolicExpr) -> sp.Expr:
         """
         Symbolic multiplication with automatic simplification.
-        
+
         Parameters
         ----------
         a, b : SymbolicExpr
             Symbolic expressions to multiply
-            
+
         Returns
         -------
         sp.Expr
             Simplified product a * b
         """
         return sp.simplify(sp.Mul(a, b))
-    
+
     @staticmethod
     def symbolic_pow(base: SymbolicExpr, exponent: SymbolicExpr) -> sp.Expr:
         """
         Symbolic exponentiation.
-        
+
         Parameters
         ----------
         base : SymbolicExpr
             Base expression
         exponent : SymbolicExpr
             Exponent expression
-            
+
         Returns
         -------
         sp.Expr
             Simplified expression base^exponent
         """
         return sp.simplify(sp.Pow(base, exponent))
-    
+
     @staticmethod
     def symbolic_div(numerator: SymbolicExpr, denominator: SymbolicExpr) -> sp.Expr:
         """
         Symbolic division with simplification.
-        
+
         Parameters
         ----------
         numerator : SymbolicExpr
             Numerator expression
         denominator : SymbolicExpr
             Denominator expression
-            
+
         Returns
         -------
         sp.Expr
             Simplified rational expression
-            
+
         Raises
         ------
         ValueError
@@ -126,14 +125,14 @@ class AtomicPrimitives:
         if denominator == 0:
             raise ValueError("Division by zero")
         return sp.simplify(numerator / denominator)
-    
+
     # ==================== Differential Primitives ====================
-    
+
     @staticmethod
     def symbolic_diff(expr: sp.Expr, var: sp.Symbol, order: int = 1) -> sp.Expr:
         """
         Symbolic differentiation.
-        
+
         Parameters
         ----------
         expr : sp.Expr
@@ -142,45 +141,45 @@ class AtomicPrimitives:
             Variable to differentiate with respect to
         order : int, optional
             Order of differentiation (default: 1)
-            
+
         Returns
         -------
         sp.Expr
             Derivative of expr with respect to var
         """
         return sp.diff(expr, var, order)
-    
+
     @staticmethod
     def gradient(expr: sp.Expr, vars_list: List[sp.Symbol]) -> List[sp.Expr]:
         """
         Compute gradient (vector of first partial derivatives).
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Scalar expression
         vars_list : List[sp.Symbol]
             List of variables
-            
+
         Returns
         -------
         List[sp.Expr]
             Gradient vector [∂expr/∂v₁, ∂expr/∂v₂, ...]
         """
         return [sp.diff(expr, var) for var in vars_list]
-    
+
     @staticmethod
     def hessian(expr: sp.Expr, vars_list: List[sp.Symbol]) -> sp.Matrix:
         """
         Compute Hessian matrix (matrix of second partial derivatives).
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Scalar expression
         vars_list : List[sp.Symbol]
             List of variables
-            
+
         Returns
         -------
         sp.Matrix
@@ -192,19 +191,19 @@ class AtomicPrimitives:
             for j, vj in enumerate(vars_list):
                 H[i, j] = sp.diff(expr, vi, vj)
         return H
-    
+
     @staticmethod
     def jacobian(expr_list: List[sp.Expr], vars_list: List[sp.Symbol]) -> sp.Matrix:
         """
         Compute Jacobian matrix of a vector-valued function.
-        
+
         Parameters
         ----------
         expr_list : List[sp.Expr]
             List of expressions [f₁, f₂, ...]
         vars_list : List[sp.Symbol]
             List of variables
-            
+
         Returns
         -------
         sp.Matrix
@@ -217,16 +216,16 @@ class AtomicPrimitives:
             for j, vj in enumerate(vars_list):
                 J[i, j] = sp.diff(fi, vj)
         return J
-    
+
     # ==================== Tensor Primitives ====================
-    
+
     @staticmethod
-    def tensor_contraction(A: np.ndarray, B: np.ndarray, 
-                          axes_A: Tuple[int, ...], 
+    def tensor_contraction(A: np.ndarray, B: np.ndarray,
+                          axes_A: Tuple[int, ...],
                           axes_B: Tuple[int, ...]) -> np.ndarray:
         """
         Generalized tensor contraction C_{ijk...} = Σ A_{...m...} B_{...m...}
-        
+
         Parameters
         ----------
         A, B : np.ndarray
@@ -235,140 +234,147 @@ class AtomicPrimitives:
             Axes of A to contract over
         axes_B : Tuple[int, ...]
             Axes of B to contract over
-            
+
         Returns
         -------
         np.ndarray
             Contracted tensor
-            
+
         Examples
         --------
+        >>> import numpy as np, sympy as sp
+        >>> A = np.array([[sp.Symbol(f"a{i}{j}") for j in range(3)] for i in range(2)])
+        >>> B = np.array([[sp.Symbol(f"b{j}{k}") for k in range(2)] for j in range(3)])
         >>> # Matrix multiplication: C_ij = A_ik B_kj
-        >>> C = tensor_contraction(A, B, (1,), (0,))
+        >>> C = AtomicPrimitives.tensor_contraction(A, B, (1,), (0,))
+        >>> C.shape
+        (2, 2)
+        >>> sp.expand(C[0, 1])
+        a00*b01 + a01*b11 + a02*b21
         """
         # Use Einstein summation for contraction
         return np.tensordot(A, B, axes=(axes_A, axes_B))
-    
+
     @staticmethod
     def outer_product(A: np.ndarray, B: np.ndarray) -> np.ndarray:
         """
         Compute outer product C_{ijk...} = A_{ij...} B_{k...}
-        
+
         Parameters
         ----------
         A, B : np.ndarray
             Input tensors
-            
+
         Returns
         -------
         np.ndarray
             Outer product with shape = A.shape + B.shape
         """
         return np.outer(A.flatten(), B.flatten()).reshape(A.shape + B.shape)
-    
+
     @staticmethod
     def tensor_trace(A: np.ndarray, axis1: int = 0, axis2: int = 1) -> np.ndarray:
         """
         Compute trace by summing over two axes.
-        
+
         Parameters
         ----------
         A : np.ndarray
             Input tensor
         axis1, axis2 : int
             Axes to trace over
-            
+
         Returns
         -------
         np.ndarray
             Tensor with reduced dimensionality
         """
         return np.trace(A, axis1=axis1, axis2=axis2)
-    
+
     @staticmethod
     def symbolic_tensor_product(A: SymbolicMatrix, B: SymbolicMatrix) -> SymbolicMatrix:
         """
         Kronecker (tensor) product of symbolic matrices.
-        
+
         Parameters
         ----------
         A, B : sp.Matrix
             Symbolic matrices
-            
+
         Returns
         -------
         sp.Matrix
             Kronecker product A ⊗ B
         """
         return sp.kronecker_product(A, B)
-    
+
     # ==================== Polynomial Primitives ====================
-    
+
     @staticmethod
     def polynomial_expand(expr: sp.Expr) -> sp.Expr:
         """
         Expand polynomial expression.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Expression to expand
-            
+
         Returns
         -------
         sp.Expr
             Expanded form
         """
         return sp.expand(expr)
-    
+
     @staticmethod
     def polynomial_factor(expr: sp.Expr) -> sp.Expr:
         """
         Factor polynomial expression.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Expression to factor
-            
+
         Returns
         -------
         sp.Expr
             Factored form
         """
         return sp.factor(expr)
-    
+
     @staticmethod
     def polynomial_collect(expr: sp.Expr, var: sp.Symbol) -> sp.Expr:
         """
         Collect terms by powers of variable.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Expression to collect
         var : sp.Symbol
             Variable to collect by
-            
+
         Returns
         -------
         sp.Expr
             Collected form
         """
         return sp.collect(expr, var)
-    
+
     @staticmethod
     def polynomial_degree(expr: sp.Expr, var: sp.Symbol) -> int:
         """
         Get degree of polynomial in variable.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Polynomial expression
         var : sp.Symbol
             Variable
-            
+
         Returns
         -------
         int
@@ -376,19 +382,19 @@ class AtomicPrimitives:
         """
         poly = sp.Poly(expr, var)
         return poly.degree()
-    
+
     @staticmethod
     def polynomial_coeffs(expr: sp.Expr, var: sp.Symbol) -> List[sp.Expr]:
         """
         Extract coefficients of polynomial.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Polynomial expression
         var : sp.Symbol
             Variable
-            
+
         Returns
         -------
         List[sp.Expr]
@@ -396,41 +402,41 @@ class AtomicPrimitives:
         """
         poly = sp.Poly(expr, var)
         return poly.all_coeffs()
-    
+
     # ==================== Matrix Primitives ====================
-    
+
     @staticmethod
     def matrix_det(M: SymbolicMatrix) -> sp.Expr:
         """
         Compute determinant of symbolic matrix.
-        
+
         Parameters
         ----------
         M : sp.Matrix
             Square matrix
-            
+
         Returns
         -------
         sp.Expr
             Determinant
         """
         return M.det()
-    
+
     @staticmethod
     def matrix_inv(M: SymbolicMatrix) -> SymbolicMatrix:
         """
         Compute inverse of symbolic matrix.
-        
+
         Parameters
         ----------
         M : sp.Matrix
             Invertible square matrix
-            
+
         Returns
         -------
         sp.Matrix
             Matrix inverse
-            
+
         Raises
         ------
         ValueError
@@ -439,50 +445,50 @@ class AtomicPrimitives:
         if M.det() == 0:
             raise ValueError("Matrix is singular and cannot be inverted")
         return M.inv()
-    
+
     @staticmethod
     def matrix_eigenvals(M: SymbolicMatrix) -> Dict[sp.Expr, int]:
         """
         Compute eigenvalues of symbolic matrix.
-        
+
         Parameters
         ----------
         M : sp.Matrix
             Square matrix
-            
+
         Returns
         -------
         Dict[sp.Expr, int]
             Dictionary mapping eigenvalues to their multiplicities
         """
         return M.eigenvals()
-    
+
     @staticmethod
     def matrix_eigenvects(M: SymbolicMatrix) -> List[Tuple[sp.Expr, int, List[sp.Matrix]]]:
         """
         Compute eigenvectors of symbolic matrix.
-        
+
         Parameters
         ----------
         M : sp.Matrix
             Square matrix
-            
+
         Returns
         -------
         List[Tuple[sp.Expr, int, List[sp.Matrix]]]
             List of (eigenvalue, multiplicity, [eigenvectors])
         """
         return M.eigenvects()
-    
+
     # ==================== Integration Primitives ====================
-    
+
     @staticmethod
-    def symbolic_integrate(expr: sp.Expr, var: sp.Symbol, 
+    def symbolic_integrate(expr: sp.Expr, var: sp.Symbol,
                           lower: Optional[SymbolicExpr] = None,
                           upper: Optional[SymbolicExpr] = None) -> sp.Expr:
         """
         Symbolic integration.
-        
+
         Parameters
         ----------
         expr : sp.Expr
@@ -491,7 +497,7 @@ class AtomicPrimitives:
             Integration variable
         lower, upper : SymbolicExpr, optional
             Integration bounds (if both provided, computes definite integral)
-            
+
         Returns
         -------
         sp.Expr
@@ -500,64 +506,91 @@ class AtomicPrimitives:
         if lower is not None and upper is not None:
             return sp.integrate(expr, (var, lower, upper))
         return sp.integrate(expr, var)
-    
+
     # ==================== Substitution and Evaluation ====================
-    
+
     @staticmethod
     def substitute(expr: sp.Expr, subs_dict: Dict[sp.Symbol, SymbolicExpr]) -> sp.Expr:
         """
         Substitute variables in expression.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Expression
         subs_dict : Dict[sp.Symbol, SymbolicExpr]
             Substitution dictionary
-            
+
         Returns
         -------
         sp.Expr
             Expression with substitutions applied
         """
         return expr.subs(subs_dict)
-    
+
     @staticmethod
-    def evaluate_numeric(expr: sp.Expr, subs_dict: Dict[sp.Symbol, float]) -> float:
+    def evaluate_numeric(expr: SymbolicExpr,
+                        subs_dict: Dict[sp.Symbol, float]) -> float:
         """
         Numerically evaluate expression at a point.
-        
+
         Parameters
         ----------
         expr : sp.Expr
             Expression to evaluate
         subs_dict : Dict[sp.Symbol, float]
-            Variable values
-            
+            Variable values. Keys may be symbols or symbol names.
+
         Returns
         -------
         float
             Numeric result
+
+        Raises
+        ------
+        ValueError
+            If a symbol of ``expr`` has no value here. Without the check a
+            partially substituted expression fails later with an opaque
+            ``TypeError: Cannot convert expression to float``.
+
+        Examples
+        --------
+        >>> import sympy as sp
+        >>> x = sp.Symbol('x')
+        >>> AtomicPrimitives.evaluate_numeric(x * 2, {x: 2.0})
+        4.0
+        >>> AtomicPrimitives.evaluate_numeric(x * 2, {"x": 2.0})
+        4.0
         """
-        return float(expr.subs(subs_dict).evalf())
-    
+        expr = sp.sympify(expr)
+        mapping = {(key if isinstance(key, sp.Basic) else sp.Symbol(str(key))): value
+                   for key, value in subs_dict.items()}
+        value = expr.subs(mapping)
+        unresolved = sorted(str(sym) for sym in value.free_symbols)
+        if unresolved:
+            raise ValueError(
+                f"evaluate_numeric(): unresolved symbols {unresolved}; "
+                f"pass a value for each one"
+            )
+        return float(value.evalf())
+
     # ==================== Simplification Primitives ====================
-    
+
     @staticmethod
     def simplify(expr: sp.Expr) -> sp.Expr:
         """General simplification."""
         return sp.simplify(expr)
-    
+
     @staticmethod
     def trigsimp(expr: sp.Expr) -> sp.Expr:
         """Trigonometric simplification."""
         return sp.trigsimp(expr)
-    
+
     @staticmethod
     def ratsimp(expr: sp.Expr) -> sp.Expr:
         """Rational simplification."""
         return sp.ratsimp(expr)
-    
+
     @staticmethod
     def cancel(expr: sp.Expr) -> sp.Expr:
         """Cancel common factors."""
@@ -582,10 +615,10 @@ def diff(expr: sp.Expr, var: sp.Symbol, order: int = 1) -> sp.Expr:
 
 __all__ = [
     'AtomicPrimitives',
-    'add',
-    'mul',
-    'diff',
     'SymbolicExpr',
     'SymbolicMatrix',
     'TensorLike',
+    'add',
+    'diff',
+    'mul',
 ]

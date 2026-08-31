@@ -16,7 +16,7 @@ abstract: >
   architecture supports Taylor manifold expansions, Gröbner-based solving,
   perturbation analysis, pathfinding over symbolic energy landscapes, and
   neuro-symbolic training.
-version: "1.0.0"
+version: "0.2.0"
 date-released: 2025-01-01
 license: "Apache-2.0"
 repository-code: "https://github.com/recursive-ai-dev/symbo"

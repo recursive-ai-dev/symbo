@@ -20,14 +20,23 @@ The enhanced NanoTensor is designed to be **copy-pasted into agents to give them
 git clone https://github.com/recursive-ai-dev/symbo
 cd symbo
 
-# The military-grade features are built into symbo.py
-# No additional dependencies required!
+# Install it (only sympy/numpy/networkx are required - no extra dependencies)
+pip install -e .
+
+# The military-grade behaviour is built into the shipped NanoTensor class
+# (symbo/nanotensor.py) - there is nothing else to enable.
 ```
+
+> **Which class?** `from symbo import NanoTensor` is the production class and has
+> the agency layer (health monitoring, validation, experience tracking, caching).
+> `symbo/nano_tensor_enhanced.py` additionally offers `MilitaryGradeNanoTensor`, a
+> *standalone* copy of the same design for runtimes that cannot install the package;
+> it is not a subclass and exposes a smaller API. Use `NanoTensor` normally.
 
 ### 30-Second Example
 
 ```python
-from symbo import NanoTensor  # Import from symbo.py directly
+from symbo import NanoTensor  # the shipped, hardened class
 import sympy as sp
 
 # Create a military-grade brain
@@ -78,7 +87,7 @@ Here's a complete agent you can copy-paste and customize:
 
 ```python
 import sympy as sp
-from symbo import NanoTensor  # Import from symbo.py
+from symbo import NanoTensor
 
 class AutonomousAgent:
     """
@@ -242,4 +251,4 @@ Enhanced by the Symbo team to provide agents with true agency.
 
 ---
 
-**Start using it now**: Just import `NanoTensor` from `symbo.py` and your agent has a brain! 🧠
+**Start using it now**: `pip install -e .`, import `NanoTensor`, and your agent has a brain! 🧠

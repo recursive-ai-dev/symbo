@@ -1,0 +1,142 @@
+# Symbo continuous integration.
+#
+# This workflow is staged at `.ci/ci.yml` rather than `.github/workflows/ci.yml`
+# because the account that prepared it (a GitHub App) is refused by GitHub when a
+# push creates or updates anything under `.github/workflows/` without the
+# `workflows` permission.  Nothing else about it is unusual -- to turn CI on:
+#
+#   mkdir -p .github/workflows
+#   git mv .ci/ci.yml .github/workflows/ci.yml
+#   git commit -m "ci: enable the workflow staged by PR <n>" && git push
+#
+# Until then, run the same five jobs locally (see the README "Development"
+# section); each block below is a literal command.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The core engine only needs sympy/numpy/networkx; every job below that installs
+# more is exercising an extra. `symbo[all]` also pulls torch, which is why the
+# torch job is separate (and allowed to fail: the CPU wheel is large and flaky to
+# fetch on some runners).
+jobs:
+  lint:
+    name: Lint (ruff + pyflakes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install "ruff>=0.4" pyflakes
+      - name: ruff
+        run: ruff check symbo tests demo_military_grade.py stress_test.py
+      - name: pyflakes
+        run: python -m pyflakes symbo tests demo_military_grade.py stress_test.py
+
+  core:
+    name: Core only (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >=3.10, so test the floor and the newest release.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package with dev tools only (no optional extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Report the environment the CLI sees
+        run: symbo --check
+      - name: Test (optional-backend tests must skip, not fail)
+        run: python -m pytest -q
+      - name: Doctests
+        run: python -m pytest -q --doctest-modules symbo
+      - name: Root demo scripts still run against the package
+        run: |
+          python demo_military_grade.py
+          python stress_test.py
+      - name: Import from an unrelated working directory
+        run: cd /tmp && python -c "import symbo; print(symbo.__version__)"
+
+  extras:
+    name: Extras (viz, io, opt, kb, dashboard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[viz,io,opt,kb,dashboard,dev]"
+      - name: Test everything the extras enable
+        run: python -m pytest -q
+      - name: Verify the serialisation wire formats
+        run: python -c "from symbo.io.serialization import verify_round_trip_serialization as v; r=v(); print(r); assert all(r.values()), r"
+      - name: Coverage summary
+        run: python -m pytest -q --cov=symbo --cov-report=term-missing -m "not slow"
+
+  torch:
+    name: Neuro extra (torch)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          # The CPU wheel from the PyPI index is far smaller than the default CUDA
+          # build; installing it first means the extra below is already satisfied.
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[neuro,dev]"
+      - name: Torch-gated tests
+        run: python -m pytest -q -m torch
+
+  package:
+    name: Build and check the distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Install the wheel in a clean environment and smoke-test it
+        run: |
+          python -m venv .verify-venv
+          .verify-venv/bin/python -m pip install dist/*.whl
+          .verify-venv/bin/python -c "import symbo; print(symbo.__version__)"
+          .verify-venv/bin/symbo --check
+      - name: The wheel can round-trip an expression with core deps only
+        run: |
+          .verify-venv/bin/python - <<'PY'
+          import sympy as sp
+          from symbo.io.serialization import SymboSerializer as S
+          x, y = sp.symbols('x y')
+          expr = x ** 2 + sp.sin(y)
+          back = S.deserialize_expression(S.serialize_expression(expr))
+          assert sp.simplify(expr - back) == 0, back
+          print("wheel round-trip ok:", back)
+          PY

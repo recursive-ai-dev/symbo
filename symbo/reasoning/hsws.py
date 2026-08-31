@@ -18,21 +18,10 @@ This production-grade implementation includes:
 - Comprehensive error handling and type safety
 """
 
-import math
 import difflib
-from typing import List, Dict, Optional, Tuple, Any, Union, Set
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-import warnings
-
-# Import MilitaryGradeNanoTensor for advanced computation capabilities if needed
-# For now, we use standard float logic but structure it to be compatible
-# with the NanoTensor ecosystem.
-try:
-    from symbo.nano_tensor_enhanced import MilitaryGradeNanoTensor, AgencyCore
-except ImportError:
-    # Fallback if not in the same package structure (e.g. testing)
-    MilitaryGradeNanoTensor = None
 
 # --- Semantic Engine Interface ---
 
@@ -157,7 +146,8 @@ class RobustSemanticEngine(SemanticEngine):
                 return difflib.SequenceMatcher(None, t2, best_match[0]).ratio()
         return 0.0
 
-    def match(self, query: str, targets: List[str], threshold: float = None) -> List[Tuple[str, float]]:
+    def match(self, query: str, targets: List[str],
+              threshold: Optional[float] = None) -> List[Tuple[str, float]]:
         """
         Check if any of the targets exist in the query, allowing for fuzzy matching.
         Returns a list of (matched_target, score).
@@ -201,19 +191,10 @@ class RobustSemanticEngine(SemanticEngine):
                 # because of the length difference.
                 # Instead, we can try to find the best matching block.
 
-                s = difflib.SequenceMatcher(None, norm_target, self._normalize(query))
-                match = s.find_longest_match(0, len(norm_target), 0, len(self._normalize(query)))
-
-                # If we find a block that covers most of the target, that's good?
-                # No, find_longest_match is exact. We need fuzzy.
-
-                # Let's just compare ratio. If query is long, ratio is low.
-                # However, for the specific case of "artificl inteligence",
-                # we can try sliding window or just rely on the fact that if the target is
-                # intended to be in the query, the query might just BE the target + noise.
-
-                # Better approach for production:
-                # Check if each token in target has a fuzzy match in query tokens, in order.
+                # A multi-word target is matched token-by-token rather than by
+                # comparing whole strings: `SequenceMatcher.ratio()` on a long
+                # query is dominated by the length difference, so it would score
+                # "artificl inteligence" inside a real sentence far too low.
 
                 target_matched_tokens = 0
                 last_idx = -1
@@ -222,7 +203,8 @@ class RobustSemanticEngine(SemanticEngine):
                     best_token_idx = -1
 
                     for i, q_token in enumerate(query_tokens):
-                        if i <= last_idx: continue # Enforce order
+                        if i <= last_idx:  # Enforce order
+                            continue
                         score = difflib.SequenceMatcher(None, t_token, q_token).ratio()
                         if score > best_token_score:
                             best_token_score = score
@@ -364,20 +346,17 @@ class Subconcept:
         active_bcns = [b for b in self.betaconcepts if (b.matched_meaning or b.matched_synonym or b.matched_antonym)]
 
         if active_bcns:
-            # If we have robust engine, we can check relationships
-            if isinstance(semantic_engine, RobustSemanticEngine):
-                 for bcn in active_bcns:
-                    # Check if BCn is a synonym of SCn or meaning of SCn
-                    # or if SCn is a synonym of BCn
-                    score_syn = semantic_engine.get_synonym_score(self.name, bcn.name)
-                    score_mean = semantic_engine.get_meaning_score(self.name, bcn.name)
+            # ``get_*_score`` is part of the SemanticEngine contract, so every
+            # engine can (and should) be asked about the relationship.
+            for bcn in active_bcns:
+                # Check if BCn is a synonym of SCn or meaning of SCn
+                # or if SCn is a synonym of BCn
+                score_syn = semantic_engine.get_synonym_score(self.name, bcn.name)
+                score_mean = semantic_engine.get_meaning_score(self.name, bcn.name)
 
-                    if score_syn > 0.8 or score_mean > 0.8:
-                        self.overlap_triggered = True
-                        break
-            else:
-                 # Fallback logic if needed (e.g. mock engine)
-                 pass
+                if score_syn > 0.8 or score_mean > 0.8:
+                    self.overlap_triggered = True
+                    break
 
         if self.overlap_triggered:
             self.overlap_value = self.OVERLAP_MULTIPLIER * self.base_rt
@@ -490,8 +469,6 @@ class HSWS:
         # Reset previous state
         concept.reset_matches()
 
-        query_norm = query.lower() # Simple normalization for quick checks, engine handles complex
-
         # --- 1. Recursive Traversal & Matching ---
         self._match_recursive(concept, query)
 
@@ -508,33 +485,37 @@ class HSWS:
             "concept_name": concept.name
         }
 
+    def _registered(self, attr: str, name: str) -> List[str]:
+        """Terms the engine knows for ``name`` (meanings/synonyms/antonyms)."""
+        table = getattr(self.semantic_engine, attr, None) or {}
+        # keys are stored normalised (lower-cased, stripped) by the engine
+        return sorted(table.get(name.strip().lower(), set()) or ())
+
     def _match_recursive(self, node: Union[Concept, Subconcept, Betaconcept], query: str):
         """
         Recursively match the node and its children against the query using the SemanticEngine.
+
+        A node matches on *meaning* when either its own name or one of its
+        registered definitions appears in the query; synonyms and antonyms are
+        looked up in the engine's registries as well. Engines without registries
+        simply contribute their name, which keeps hand-rolled engines working.
         """
-        # 1. Check direct meaning match (Name presence)
-        # We use the engine's match capability which handles fuzzy matching
-        matches = self.semantic_engine.match(query, [node.name])
-        if matches:
+        # 1. Check direct meaning match (name presence, or a registered definition)
+        meaning_targets = [node.name, *self._registered("meanings", node.name)]
+        if self.semantic_engine.match(query, meaning_targets):
             node.matched_meaning = True
 
         # 2. Check Synonyms
-        if isinstance(self.semantic_engine, RobustSemanticEngine):
-            # Get registered synonyms for this node's name
-            node_synonyms = self.semantic_engine.synonyms.get(node.name.lower(), set())
-            if node_synonyms:
-                syn_matches = self.semantic_engine.match(query, list(node_synonyms))
-                if syn_matches:
-                    node.matched_synonym = True
+        node_synonyms = self._registered("synonyms", node.name)
+        if node_synonyms and self.semantic_engine.match(query, node_synonyms):
+            node.matched_synonym = True
 
-            # Check Antonyms
-            node_antonyms = self.semantic_engine.antonyms.get(node.name.lower(), set())
-            if node_antonyms:
-                ant_matches = self.semantic_engine.match(query, list(node_antonyms))
-                if ant_matches:
-                    node.matched_antonym = True
+        # 3. Check Antonyms
+        node_antonyms = self._registered("antonyms", node.name)
+        if node_antonyms and self.semantic_engine.match(query, node_antonyms):
+            node.matched_antonym = True
 
-        # 3. Recurse if applicable
+        # 4. Recurse if applicable
         if isinstance(node, Concept):
             for scn in node.subconcepts:
                 self._match_recursive(scn, query)

@@ -1,12 +1,7 @@
-import sympy as sp
 import numpy as np
-import sys
-import os
-import importlib.util
+import sympy as sp
 
-spec = importlib.util.spec_from_file_location("symbo", os.path.join(os.path.dirname(__file__), 'symbo.py'))
-symbo = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(symbo)
+import symbo
 
 def test_tensor_nd():
     print("Testing n-dimensional tensor...")
@@ -83,9 +78,10 @@ def test_military():
 
     try:
         nt.eval_numeric({'x': 15})
-        assert False, "Should have thrown out of bounds error"
     except ValueError:
         pass
+    else:
+        raise AssertionError("out-of-bounds input should have raised ValueError")
 
     health = nt.health_check()
     assert health['status'] in ['optimal', 'good', 'degraded'], f"Health Status is {health['status']}"
