@@ -1,22 +1,15 @@
 # Copyright 2025
 # Additional Unit Tests for New Military-Grade Features
 
-import unittest
-import sympy as sp
-import numpy as np
-import sys
+"""Tests for persistence, CSE optimization and anomaly detection."""
+
 import os
-import shutil
-import warnings
+import tempfile
+import unittest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import sympy as sp
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("symbo_module",
-    os.path.join(os.path.dirname(__file__), '..', 'symbo.py'))
-symbo_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(symbo_module)
-NanoTensor = symbo_module.NanoTensor
+from symbo import NanoTensor
 
 class TestNewMilitaryFeatures(unittest.TestCase):
     """Test the newly added features: Persistence, Optimization, Anomaly Detection."""
@@ -28,7 +21,11 @@ class TestNewMilitaryFeatures(unittest.TestCase):
 
     def test_persistence(self):
         """Test save and load functionality."""
-        filename = "test_brain.pkl"
+        # A temp dir, not the repository root: the file used to be written next
+        # to the source, which breaks when two runs overlap or the tree is ro.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        filename = os.path.join(tmp.name, "test_brain.pkl")
         try:
             # Train
             self.nt.eval_numeric({'x': 10.0})
@@ -65,7 +62,7 @@ class TestNewMilitaryFeatures(unittest.TestCase):
         self.assertIsNotNone(self.nt._optimized_data)
         self.assertIsNotNone(self.nt._optimized_func)
 
-        replacements, reduced = self.nt._optimized_data
+        replacements, _reduced = self.nt._optimized_data
         self.assertGreater(len(replacements), 0)
 
         # Verify evaluation still works and uses optimized path
