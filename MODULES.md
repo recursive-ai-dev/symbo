@@ -435,20 +435,20 @@ x, y = sp.symbols('x y')
 
 # Serialize expression (JSON is built in; msgpack/Arrow need `pip install 'symbo[io]'`)
 expr = x**2 + y
-data = SymboSerializer.serialize_expression(expr, format='json')
-reconstructed = SymboSerializer.deserialize_expression(data, format='json')
+data = SymboSerializer.serialize_expression(expr, fmt='json')
+reconstructed = SymboSerializer.deserialize_expression(data, fmt='json')
 
 # Serialize tensor
 tensor = SymbolicTensor((2, 2))
 tensor.fill_with_symbols("A")
-data = SymboSerializer.serialize_tensor(tensor, format='json')
-reconstructed = SymboSerializer.deserialize_tensor(data, format='json')
+data = SymboSerializer.serialize_tensor(tensor, fmt='json')
+reconstructed = SymboSerializer.deserialize_tensor(data, fmt='json')
 
 # Round-trip test
 success = SymboSerializer.round_trip_test(
     expr,
-    lambda e: SymboSerializer.serialize_expression(e, format='json'),
-    lambda d: SymboSerializer.deserialize_expression(d, format='json'),
+    lambda e: SymboSerializer.serialize_expression(e, fmt='json'),
+    lambda d: SymboSerializer.deserialize_expression(d, fmt='json'),
 )
 assert success
 ```

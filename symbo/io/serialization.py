@@ -47,11 +47,11 @@ class SerializationError(Exception):
     pass
 
 
-def _check_format(format: str, allowed: Sequence[str]) -> None:
+def _check_format(fmt: str, allowed: Sequence[str]) -> None:
     """Reject unknown formats instead of silently falling back to another one."""
-    if format not in allowed:
+    if fmt not in allowed:
         raise SerializationError(
-            f"unsupported format {format!r} (use {' or '.join(allowed)})")
+            f"unsupported format {fmt!r} (use {' or '.join(allowed)})")
 
 
 def _default_format() -> str:
@@ -78,18 +78,18 @@ class SymboSerializer:
 
     @staticmethod
     def serialize_expression(expr: sp.Expr,
-                             format: Optional[str] = None) -> bytes:
+                             fmt: Optional[str] = None) -> bytes:
         """
         Serialize SymPy expression.
 
-        ``format`` defaults to ``msgpack`` when the optional backend is
+        ``fmt`` defaults to ``msgpack`` when the optional backend is
         installed and ``json`` otherwise (``'json'`` needs no extra package).
 
         Parameters
         ----------
         expr : sp.Expr
             Expression to serialize
-        format : str
+        fmt : str
             'msgpack' or 'json'
 
         Returns
@@ -106,22 +106,22 @@ class SymboSerializer:
             "complexity": sp.count_ops(expr)
         }
 
-        return SymboSerializer._pack(data, format)
+        return SymboSerializer._pack(data, fmt)
 
     @staticmethod
     def deserialize_expression(data: bytes,
-                               format: Optional[str] = None) -> sp.Expr:
+                               fmt: Optional[str] = None) -> sp.Expr:
         """
         Deserialize expression.
 
-        ``format`` defaults to ``msgpack`` when the optional backend is
+        ``fmt`` defaults to ``msgpack`` when the optional backend is
         installed and ``json`` otherwise.
 
         Parameters
         ----------
         data : bytes
             Serialized data
-        format : str
+        fmt : str
             'msgpack' or 'json'
 
         Returns
@@ -129,14 +129,14 @@ class SymboSerializer:
         sp.Expr
             Reconstructed expression
         """
-        obj = SymboSerializer._unpack(data, format)
+        obj = SymboSerializer._unpack(data, fmt)
         SymboSerializer._expect(obj, "Expression")
         if "string_repr" not in obj:
             raise SerializationError("expression payload has no 'string_repr' field")
         return safe_sympify(obj["string_repr"])
 
     @staticmethod
-    def serialize_tensor(tensor: 'SymbolicTensor', format: str = 'arrow') -> bytes:
+    def serialize_tensor(tensor: 'SymbolicTensor', fmt: str = 'arrow') -> bytes:
         """
         Serialize SymbolicTensor.
 
@@ -144,7 +144,7 @@ class SymboSerializer:
         ----------
         tensor : SymbolicTensor
             Tensor to serialize
-        format : str
+        fmt : str
             'arrow', 'msgpack' or 'json' ('arrow'/'msgpack' need ``symbo[io]``)
 
         Returns
@@ -158,7 +158,7 @@ class SymboSerializer:
         if not isinstance(tensor, SymbolicTensor):
             raise SerializationError(f"Expected SymbolicTensor, got {type(tensor)}")
 
-        _check_format(format, ("arrow", "msgpack", "json"))
+        _check_format(fmt, ("arrow", "msgpack", "json"))
 
         # Convert tensor data to strings
         flat_data = [str(e) for e in tensor.data.flat]
@@ -171,7 +171,7 @@ class SymboSerializer:
             "size": tensor.size
         }
 
-        if format == 'arrow':
+        if fmt == 'arrow':
             if pa is None:
                 raise SerializationError("pyarrow not available")
 
@@ -198,14 +198,14 @@ class SymboSerializer:
                 **metadata,
                 "data": flat_data
             }
-            if format == 'msgpack':
+            if fmt == 'msgpack':
                 if msgpack is None:
                     raise SerializationError("msgpack not available")
                 return msgpack.packb(data, use_bin_type=True)
             return json.dumps(data).encode('utf-8')
 
     @staticmethod
-    def deserialize_tensor(data: bytes, format: str = 'arrow') -> 'SymbolicTensor':
+    def deserialize_tensor(data: bytes, fmt: str = 'arrow') -> 'SymbolicTensor':
         """
         Deserialize SymbolicTensor.
 
@@ -213,7 +213,7 @@ class SymboSerializer:
         ----------
         data : bytes
             Serialized data
-        format : str
+        fmt : str
             'arrow', 'msgpack' or 'json' ('arrow'/'msgpack' need ``symbo[io]``)
 
         Returns
@@ -223,9 +223,9 @@ class SymboSerializer:
         """
         from symbo.tensor import SymbolicTensor
 
-        _check_format(format, ("arrow", "msgpack", "json"))
+        _check_format(fmt, ("arrow", "msgpack", "json"))
 
-        if format == 'arrow':
+        if fmt == 'arrow':
             if pa is None:
                 raise SerializationError("pyarrow not available")
 
@@ -248,7 +248,7 @@ class SymboSerializer:
             flat_data = table["element"].to_pylist()
 
         else:  # msgpack / json
-            obj = SymboSerializer._unpack(data, format)
+            obj = SymboSerializer._unpack(data, fmt)
             missing = [k for k in ("name", "shape", "rank", "size", "data") if k not in obj]
             if missing:
                 raise SerializationError(f"msgpack tensor payload is missing {', '.join(missing)}")
@@ -267,8 +267,24 @@ class SymboSerializer:
         return tensor
 
     @staticmethod
+    def _coefficient_entries(coefficients: Dict[Any, Any]) -> Dict[str, List[str]]:
+        """
+        Convert policy coefficient keys into a serializable mapping.
+
+        Coefficient keys are tuples of SymPy symbols. ``str(tuple)`` cannot be
+        parsed back (``"(x,)"`` is not a literal), so each coefficient is stored
+        as ``name -> [variables it multiplies]`` -- the same convention
+        ``TaylorExpansion.to_wasm_json`` uses, and reversible without eval().
+        """
+        entries: Dict[str, List[str]] = {}
+        for key, symbol in coefficients.items():
+            variables = key if isinstance(key, tuple) else (key,)
+            entries[symbol.name] = [str(v) for v in variables]
+        return entries
+
+    @staticmethod
     def serialize_policy_function(policy: Any,
-                                  format: Optional[str] = None) -> bytes:
+                                  fmt: Optional[str] = None) -> bytes:
         """
         Serialize GenerativePolicyFunction (TaylorExpansion PolicyFunction).
 
@@ -276,7 +292,7 @@ class SymboSerializer:
         ----------
         policy : PolicyFunction
             Policy function to serialize
-        format : str
+        fmt : str
             Serialization format
 
         Returns
@@ -289,26 +305,19 @@ class SymboSerializer:
         if not isinstance(policy, PolicyFunction):
             raise SerializationError(f"Expected PolicyFunction, got {type(policy)}")
 
-        # Coefficient keys are tuples of SymPy symbols. ``str(tuple)`` cannot be
-        # parsed back (``"(x,)"`` is not a literal), so each coefficient is stored
-        # as ``name -> [variables it multiplies]`` -- the same convention
-        # ``TaylorExpansion.to_wasm_json`` uses, and reversible without eval().
         data = {
             "type": "PolicyFunction",
             "expansion": str(policy.expansion),
             "variables": [str(v) for v in policy.variables],
             "center": {str(k): float(v) for k, v in policy.center.items()},
-            "coefficients": {
-                symbol.name: [str(v) for v in key] if isinstance(key, tuple) else [str(key)]
-                for key, symbol in policy.coefficients.items()
-            },
+            "coefficients": SymboSerializer._coefficient_entries(policy.coefficients),
             "coeff_values": {str(k): v for k, v in (policy.coeff_values or {}).items()},
         }
-        return SymboSerializer._pack(data, format)
+        return SymboSerializer._pack(data, fmt)
 
     @staticmethod
     def serialize_groebner_state(state: Any,
-                                 format: Optional[str] = None) -> bytes:
+                                 fmt: Optional[str] = None) -> bytes:
         """
         Serialize GröbnerBasisState.
 
@@ -316,7 +325,7 @@ class SymboSerializer:
         ----------
         state : GröbnerBasisState
             State to serialize
-        format : str
+        fmt : str
             Serialization format
 
         Returns
@@ -342,47 +351,47 @@ class SymboSerializer:
             ]
         }
 
-        return SymboSerializer._pack(data, format)
+        return SymboSerializer._pack(data, fmt)
 
     # ------------------------------------------------------------------ formats
 
     @staticmethod
-    def _pack(data: Dict[str, Any], format: Optional[str]) -> bytes:
+    def _pack(data: Dict[str, Any], fmt: Optional[str]) -> bytes:
         """Encode a payload dict as msgpack (default) or JSON bytes."""
-        if format is None:
-            format = _default_format()
-        if format == 'msgpack':
+        if fmt is None:
+            fmt = _default_format()
+        if fmt == 'msgpack':
             if msgpack is None:
                 raise SerializationError(
                     "msgpack not available; install it with `pip install 'symbo[io]'` "
-                    "or pass format='json'"
+                    "or pass fmt='json'"
                 )
             return msgpack.packb(data, use_bin_type=True)
-        if format == 'json':
+        if fmt == 'json':
             return json.dumps(data).encode('utf-8')
-        raise SerializationError(f"unsupported format {format!r} (use 'msgpack' or 'json')")
+        raise SerializationError(f"unsupported format {fmt!r} (use 'msgpack' or 'json')")
 
     @staticmethod
-    def _unpack(data: bytes, format: Optional[str]) -> Dict[str, Any]:
+    def _unpack(data: bytes, fmt: Optional[str]) -> Dict[str, Any]:
         """Decode msgpack/JSON bytes into a payload dict."""
-        if format is None:
-            format = _default_format()
-        if format == 'msgpack':
+        if fmt is None:
+            fmt = _default_format()
+        if fmt == 'msgpack':
             if msgpack is None:
                 raise SerializationError(
                     "msgpack not available; install it with `pip install 'symbo[io]'` "
-                    "or pass format='json'"
+                    "or pass fmt='json'"
                 )
             try:
                 return msgpack.unpackb(data, raw=False)
             except (ValueError, msgpack.exceptions.ExtraData) as exc:
                 raise SerializationError(f"corrupt msgpack payload: {exc}") from exc
-        if format == 'json':
+        if fmt == 'json':
             try:
                 return json.loads(data.decode('utf-8'))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise SerializationError(f"corrupt JSON payload: {exc}") from exc
-        raise SerializationError(f"unsupported format {format!r} (use 'msgpack' or 'json')")
+        raise SerializationError(f"unsupported format {fmt!r} (use 'msgpack' or 'json')")
 
     @staticmethod
     def _expect(payload: Dict[str, Any], kind: str) -> None:
@@ -396,7 +405,7 @@ class SymboSerializer:
 
     @staticmethod
     def deserialize_policy_function(data: bytes,
-                                   format: Optional[str] = None) -> Any:
+                                   fmt: Optional[str] = None) -> Any:
         """
         Rebuild a :class:`~symbo.generative.taylor.PolicyFunction`.
 
@@ -411,7 +420,7 @@ class SymboSerializer:
         """
         from symbo.generative.taylor import PolicyFunction
 
-        payload = SymboSerializer._unpack(data, format)
+        payload = SymboSerializer._unpack(data, fmt)
         SymboSerializer._expect(payload, "PolicyFunction")
 
         variables = [sp.Symbol(name) for name in payload["variables"]]
@@ -443,7 +452,7 @@ class SymboSerializer:
 
     @staticmethod
     def deserialize_groebner_state(data: bytes,
-                                  format: Optional[str] = None) -> Any:
+                                  fmt: Optional[str] = None) -> Any:
         """
         Rebuild a :class:`~symbo.solver.groebner.GröbnerBasisState`.
 
@@ -454,7 +463,7 @@ class SymboSerializer:
         """
         from symbo.solver.groebner import GröbnerBasisState
 
-        payload = SymboSerializer._unpack(data, format)
+        payload = SymboSerializer._unpack(data, fmt)
         SymboSerializer._expect(payload, "GröbnerBasisState")
 
         variables = [sp.Symbol(v) for v in payload.get("variables") or []]
