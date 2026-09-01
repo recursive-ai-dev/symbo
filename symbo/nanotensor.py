@@ -1839,6 +1839,21 @@ class NanoTensor:
         Z = self.eval_numeric(point)
         return X, Y, np.asarray(Z, dtype=float).reshape(X.shape)
 
+    @staticmethod
+    def _resolve_plot_axes(plt: Any, ax: Optional[Any]) -> Tuple[Any, Any, bool]:
+        """
+        Decide where a plot should be drawn.
+
+        Returns ``(figure, axes, created)``: when ``ax`` is ``None`` a new
+        figure/axes pair is created (``created`` is ``True``, so the caller
+        knows it owns showing it); otherwise the caller-supplied axes and its
+        parent figure are reused as-is.
+        """
+        if ax is None:
+            fig, axes = plt.subplots(figsize=(8, 6))
+            return fig, axes, True
+        return ax.get_figure(), ax, False
+
     def plot_contour(self, var1: str, var2: str,
                      fixed: Optional[Dict[str, float]] = None,
                      levels: int = 20,
@@ -1876,17 +1891,12 @@ class NanoTensor:
                                      range1=range1, range2=range2,
                                      n1=n, n2=n)
 
-        created_fig = False
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 6))
-            created_fig = True
-        else:
-            fig = ax.get_figure()
+        fig, axes, created_fig = self._resolve_plot_axes(plt, ax)
 
-        ax.contourf(X, Y, Z, levels=levels, cmap='viridis')
-        ax.set_xlabel(var1)
-        ax.set_ylabel(var2)
-        ax.set_title(f'Contour plot: {self.name}')
+        axes.contourf(X, Y, Z, levels=levels, cmap='viridis')
+        axes.set_xlabel(var1)
+        axes.set_ylabel(var2)
+        axes.set_title(f'Contour plot: {self.name}')
 
         if created_fig:
             plt.show()
@@ -1972,22 +1982,17 @@ class NanoTensor:
 
         path = self.find_path_on_grid(Z, start=start, goal=goal, mode=mode)
 
-        created_fig = False
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 6))
-            created_fig = True
-        else:
-            fig = ax.get_figure()
+        fig, axes, created_fig = self._resolve_plot_axes(plt, ax)
 
-        ax.contourf(X, Y, Z, levels=30)
-        ax.set_xlabel(var1)
-        ax.set_ylabel(var2)
-        ax.set_title(f'Pathfinding on {self.name}')
+        axes.contourf(X, Y, Z, levels=30)
+        axes.set_xlabel(var1)
+        axes.set_ylabel(var2)
+        axes.set_title(f'Pathfinding on {self.name}')
 
         if path:
             px = [X[i, j] for (i, j) in path]
             py = [Y[i, j] for (i, j) in path]
-            ax.plot(px, py, linewidth=2)
+            axes.plot(px, py, linewidth=2)
 
         if created_fig:
             plt.show()

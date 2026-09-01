@@ -75,8 +75,11 @@ class TestPlotBackends:
         fig, path = surface_tensor.plot_grid_with_path("x0", "x1", start=(0, 0),
                                                        goal=(5, 7), n1=12, n2=12)
         assert hasattr(fig, "savefig")
-        # the documented return is (figure, path); the path must be drawn
-        assert path and path[0] == (0, 0) and path[-1] == (5, 7)
+        # the documented return is (figure, path); the path must be drawn.
+        # Explicit raise instead of `assert` so the check survives -O and
+        # static analysis (B101).
+        if not (path and path[0] == (0, 0) and path[-1] == (5, 7)):
+            raise AssertionError(f"path must run (0, 0) -> (5, 7), got {path!r}")
 
 
 class TestTorchPathway:
@@ -107,7 +110,10 @@ class TestTorchPathway:
         fitted = trainer.torch_fit(loader, epochs=400, lr=0.05)
         assert fitted["g_x0"] == pytest.approx(2.0, abs=0.05)
         assert fitted["g_x1"] == pytest.approx(-0.7, abs=0.05)
-        assert fitted["g_bias"] == pytest.approx(1.5, abs=0.05)
+        # Explicit raise instead of `assert` so the check survives -O and
+        # static analysis (B101).
+        if fitted["g_bias"] != pytest.approx(1.5, abs=0.05):
+            raise AssertionError(f"g_bias should be ~1.5, got {fitted['g_bias']}")
 
     @pytest.mark.torch
     def test_torch_fit_rejects_bad_tensors(self, linear_problem):
