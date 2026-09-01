@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 import sympy as sp
@@ -54,6 +54,16 @@ def _check_format(format: str, allowed: Sequence[str]) -> None:
             f"unsupported format {format!r} (use {' or '.join(allowed)})")
 
 
+def _default_format() -> str:
+    """Pick the best wire format for the installed environment.
+
+    MessagePack is compact and therefore preferred when the optional ``msgpack``
+    backend is present; JSON needs no extra dependency, so the no-argument API
+    keeps working in a core-only installation.
+    """
+    return "msgpack" if msgpack is not None else "json"
+
+
 class SymboSerializer:
     """
     Universal serializer for Symbo types.
@@ -67,9 +77,13 @@ class SymboSerializer:
     """
 
     @staticmethod
-    def serialize_expression(expr: sp.Expr, format: str = 'msgpack') -> bytes:
+    def serialize_expression(expr: sp.Expr,
+                             format: Optional[str] = None) -> bytes:
         """
         Serialize SymPy expression.
+
+        ``format`` defaults to ``msgpack`` when the optional backend is
+        installed and ``json`` otherwise (``'json'`` needs no extra package).
 
         Parameters
         ----------
@@ -95,9 +109,13 @@ class SymboSerializer:
         return SymboSerializer._pack(data, format)
 
     @staticmethod
-    def deserialize_expression(data: bytes, format: str = 'msgpack') -> sp.Expr:
+    def deserialize_expression(data: bytes,
+                               format: Optional[str] = None) -> sp.Expr:
         """
         Deserialize expression.
+
+        ``format`` defaults to ``msgpack`` when the optional backend is
+        installed and ``json`` otherwise.
 
         Parameters
         ----------
@@ -127,7 +145,7 @@ class SymboSerializer:
         tensor : SymbolicTensor
             Tensor to serialize
         format : str
-            'arrow' or 'msgpack'
+            'arrow', 'msgpack' or 'json' ('arrow'/'msgpack' need ``symbo[io]``)
 
         Returns
         -------
@@ -140,7 +158,7 @@ class SymboSerializer:
         if not isinstance(tensor, SymbolicTensor):
             raise SerializationError(f"Expected SymbolicTensor, got {type(tensor)}")
 
-        _check_format(format, ("arrow", "msgpack"))
+        _check_format(format, ("arrow", "msgpack", "json"))
 
         # Convert tensor data to strings
         flat_data = [str(e) for e in tensor.data.flat]
@@ -175,15 +193,16 @@ class SymboSerializer:
 
             return sink.getvalue().to_pybytes()
 
-        else:  # msgpack
-            if msgpack is None:
-                raise SerializationError("msgpack not available")
-
+        else:  # msgpack / json
             data = {
                 **metadata,
                 "data": flat_data
             }
-            return msgpack.packb(data, use_bin_type=True)
+            if format == 'msgpack':
+                if msgpack is None:
+                    raise SerializationError("msgpack not available")
+                return msgpack.packb(data, use_bin_type=True)
+            return json.dumps(data).encode('utf-8')
 
     @staticmethod
     def deserialize_tensor(data: bytes, format: str = 'arrow') -> 'SymbolicTensor':
@@ -195,7 +214,7 @@ class SymboSerializer:
         data : bytes
             Serialized data
         format : str
-            'arrow' or 'msgpack'
+            'arrow', 'msgpack' or 'json' ('arrow'/'msgpack' need ``symbo[io]``)
 
         Returns
         -------
@@ -204,7 +223,7 @@ class SymboSerializer:
         """
         from symbo.tensor import SymbolicTensor
 
-        _check_format(format, ("arrow", "msgpack"))
+        _check_format(format, ("arrow", "msgpack", "json"))
 
         if format == 'arrow':
             if pa is None:
@@ -228,8 +247,8 @@ class SymboSerializer:
             # Extract data
             flat_data = table["element"].to_pylist()
 
-        else:  # msgpack
-            obj = SymboSerializer._unpack(data, "msgpack")
+        else:  # msgpack / json
+            obj = SymboSerializer._unpack(data, format)
             missing = [k for k in ("name", "shape", "rank", "size", "data") if k not in obj]
             if missing:
                 raise SerializationError(f"msgpack tensor payload is missing {', '.join(missing)}")
@@ -248,7 +267,8 @@ class SymboSerializer:
         return tensor
 
     @staticmethod
-    def serialize_policy_function(policy: Any, format: str = 'msgpack') -> bytes:
+    def serialize_policy_function(policy: Any,
+                                  format: Optional[str] = None) -> bytes:
         """
         Serialize GenerativePolicyFunction (TaylorExpansion PolicyFunction).
 
@@ -287,7 +307,8 @@ class SymboSerializer:
         return SymboSerializer._pack(data, format)
 
     @staticmethod
-    def serialize_groebner_state(state: Any, format: str = 'msgpack') -> bytes:
+    def serialize_groebner_state(state: Any,
+                                 format: Optional[str] = None) -> bytes:
         """
         Serialize GröbnerBasisState.
 
@@ -326,8 +347,10 @@ class SymboSerializer:
     # ------------------------------------------------------------------ formats
 
     @staticmethod
-    def _pack(data: Dict[str, Any], format: str) -> bytes:
+    def _pack(data: Dict[str, Any], format: Optional[str]) -> bytes:
         """Encode a payload dict as msgpack (default) or JSON bytes."""
+        if format is None:
+            format = _default_format()
         if format == 'msgpack':
             if msgpack is None:
                 raise SerializationError(
@@ -340,8 +363,10 @@ class SymboSerializer:
         raise SerializationError(f"unsupported format {format!r} (use 'msgpack' or 'json')")
 
     @staticmethod
-    def _unpack(data: bytes, format: str) -> Dict[str, Any]:
+    def _unpack(data: bytes, format: Optional[str]) -> Dict[str, Any]:
         """Decode msgpack/JSON bytes into a payload dict."""
+        if format is None:
+            format = _default_format()
         if format == 'msgpack':
             if msgpack is None:
                 raise SerializationError(
@@ -371,7 +396,7 @@ class SymboSerializer:
 
     @staticmethod
     def deserialize_policy_function(data: bytes,
-                                   format: str = 'msgpack') -> Any:
+                                   format: Optional[str] = None) -> Any:
         """
         Rebuild a :class:`~symbo.generative.taylor.PolicyFunction`.
 
@@ -418,7 +443,7 @@ class SymboSerializer:
 
     @staticmethod
     def deserialize_groebner_state(data: bytes,
-                                  format: str = 'msgpack') -> Any:
+                                  format: Optional[str] = None) -> Any:
         """
         Rebuild a :class:`~symbo.solver.groebner.GröbnerBasisState`.
 
@@ -595,7 +620,8 @@ def verify_round_trip_serialization() -> Dict[str, bool]:
     """
     results = {}
 
-    # Test Expression
+    # Test Expression. The no-format call picks msgpack when available and
+    # JSON otherwise, so the self-check also succeeds in a core-only env.
     x, y = sp.symbols('x y')
     expr = x**2 + sp.sin(y)
 
@@ -610,7 +636,7 @@ def verify_round_trip_serialization() -> Dict[str, bool]:
     tensor = SymbolicTensor((2, 2), name="test")
     tensor.fill_with_symbols("T")
 
-    for fmt in ('arrow', 'msgpack'):
+    for fmt in ('json', 'arrow', 'msgpack'):
         if fmt == 'arrow' and pa is None:
             continue
         if fmt == 'msgpack' and msgpack is None:

@@ -2,6 +2,7 @@ import numpy as np
 import sympy as sp
 
 import symbo
+from symbo._optional import is_available
 
 def test_tensor_nd():
     print("Testing n-dimensional tensor...")
@@ -33,15 +34,21 @@ def test_serialization():
     F = [x**2 - y, y**2 - x]
     G = sp.groebner(F, x, y)
 
-    # MessagePack
-    msg = symbo.serialize_basis_msgpack(G)
-    print("Msgpack OK, size:", len(msg))
-    assert len(msg) > 0, "MessagePack serialization failed"
+    # MessagePack (optional: requires the ``symbo[io]`` extra)
+    if is_available("msgpack"):
+        msg = symbo.serialize_basis_msgpack(G)
+        print("Msgpack OK, size:", len(msg))
+        assert len(msg) > 0, "MessagePack serialization failed"
+    else:
+        print("msgpack not installed; skipping MessagePack serialization check")
 
-    # Arrow
-    arr = symbo.serialize_basis_arrow(G)
-    print("Arrow OK, size:", len(arr))
-    assert len(arr) > 0, "Arrow serialization failed"
+    # Arrow (optional: requires the ``symbo[io]`` extra)
+    if is_available("pyarrow"):
+        arr = symbo.serialize_basis_arrow(G)
+        print("Arrow OK, size:", len(arr))
+        assert len(arr) > 0, "Arrow serialization failed"
+    else:
+        print("pyarrow not installed; skipping Arrow serialization check")
 
 def test_wasm():
     print("Testing WASM...")

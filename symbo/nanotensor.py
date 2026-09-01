@@ -830,19 +830,35 @@ class NanoTensor:
 
         came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
         g_score = {start: 0.0}
+        # ``Z`` is a *value/cost* landscape and may contain negative entries.
+        # Without a closed set a node can be re-opened after expansion, which
+        # can write a parent pointer back into one of its own ancestors and
+        # make the goal-path reconstruction loop forever. Expanding every node
+        # at most once bounds the search and keeps the parent graph acyclic.
+        expanded: set = set()
 
         while open_set:
             _, current = heapq.heappop(open_set)
+            if current in expanded:
+                continue
+            expanded.add(current)
+
             if current == goal:
-                # reconstruct path
+                # reconstruct path (cycle-guarded defensively)
                 path = [current]
+                seen = {current}
                 while current in came_from:
                     current = came_from[current]
+                    if current in seen:
+                        break
+                    seen.add(current)
                     path.append(current)
                 path.reverse()
                 return path
 
             for nb in neighbors(*current):
+                if nb in expanded:
+                    continue
                 tentative_g = g_score[current] + float(cost_grid[nb])
                 if tentative_g < g_score.get(nb, float("inf")):
                     came_from[nb] = current
@@ -1867,8 +1883,7 @@ class NanoTensor:
         else:
             fig = ax.get_figure()
 
-        contour = ax.contourf(X, Y, Z, levels=levels, cmap='viridis')
-        fig.colorbar(contour, ax=ax)
+        ax.contourf(X, Y, Z, levels=levels, cmap='viridis')
         ax.set_xlabel(var1)
         ax.set_ylabel(var2)
         ax.set_title(f'Contour plot: {self.name}')
@@ -1964,8 +1979,7 @@ class NanoTensor:
         else:
             fig = ax.get_figure()
 
-        contour = ax.contourf(X, Y, Z, levels=30)
-        fig.colorbar(contour, ax=ax)
+        ax.contourf(X, Y, Z, levels=30)
         ax.set_xlabel(var1)
         ax.set_ylabel(var2)
         ax.set_title(f'Pathfinding on {self.name}')
@@ -2245,7 +2259,10 @@ class HybridTrainer(SymbolicTrainer):
             raise ValueError(f"X must be 2-D (n_samples, n_features); got shape {X.shape}")
 
         def objective(deg):
-            nt_try = NanoTensor((1,), max_order=int(deg[0]),
+            # ``max_order >= 1`` is required by NanoTensor, so clamp degrees
+            # (the GP may probe values at/below the lower bound).
+            order = max(1, int(deg[0]))
+            nt_try = NanoTensor((1,), max_order=order,
                                base_vars=[f'x{i}' for i in range(X.shape[1])])
             nt_try.generate_taylor({f'x{i}': 0 for i in range(X.shape[1])})
             trainer_try = HybridTrainer(nt_try)
@@ -2260,7 +2277,7 @@ class HybridTrainer(SymbolicTrainer):
             pred = trainer_try.predict_batch(X)
             return np.mean((pred - y)**2)
 
-        bounds = [(0, max(1, int(max_deg)))]
+        bounds = [(1, max(1, int(max_deg)))]
         skopt = optional_module("skopt")
         if skopt is None:
             logger.info(
@@ -2400,12 +2417,12 @@ class HybridTrainer(SymbolicTrainer):
             )
 
         names = [v.name for v in nt.base_vars] if var_order is None else list(var_order)
-        unknown = [n for n in names if n not in {v.name for v in nt.symvars}
-                   and n not in names and sp.Symbol(n) not in nt.base_vars]
+        known = {v.name for v in nt.base_vars}
+        unknown = [n for n in names if n not in known]
         if unknown:
             raise ValueError(
                 f"torch_fit(): var_order entries {unknown} are not variables of "
-                f"tensor '{nt.name}' (known: {names})"
+                f"tensor '{nt.name}' (known: {sorted(known)})"
             )
         # Columns of a batch are mapped positionally onto `names`; the lambdify
         # signature is built in that *same* explicit order.

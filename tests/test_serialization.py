@@ -61,10 +61,12 @@ class TestTensors:
         t.fill_with_symbols("m")
         return t
 
-    @pytest.mark.parametrize("fmt", ["arrow", "msgpack"])
+    @pytest.mark.parametrize("fmt", ["json", "arrow", "msgpack"])
     def test_round_trip(self, tensor, fmt):
         if fmt == "arrow":
             pytest.importorskip("pyarrow")
+        if fmt == "msgpack":
+            pytest.importorskip("msgpack")
         payload = SymboSerializer.serialize_tensor(tensor, fmt)
         restored = SymboSerializer.deserialize_tensor(payload, fmt)
         assert restored.shape == tensor.shape

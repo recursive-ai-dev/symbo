@@ -316,6 +316,18 @@ class TestGridsAndPathfinding:
         # the cheap route stays in column 0 until the bottom row
         assert (0, 1) not in path and (1, 1) not in path
 
+    def test_find_path_on_grid_terminates_on_negative_landscape(self):
+        # Negative entries make the naive A* re-open expanded nodes, which can
+        # write a parent pointer back into an ancestor and make the goal-path
+        # reconstruction loop forever (OOM). The search must terminate and
+        # return a simple path.
+        rng = np.random.default_rng(0)
+        Z = rng.normal(size=(12, 12))
+        path = NanoTensor.find_path_on_grid(Z, (0, 0), (5, 7))
+        assert path
+        assert path[0] == (0, 0) and path[-1] == (5, 7)
+        assert len(set(path)) == len(path)  # no repeated nodes
+
     def test_find_path_out_of_bounds(self):
         with pytest.raises(ValueError, match="out of bounds"):
             NanoTensor.find_path_on_grid(np.zeros((2, 2)), (0, 0), (5, 5))
