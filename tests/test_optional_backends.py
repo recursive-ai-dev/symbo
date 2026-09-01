@@ -72,9 +72,11 @@ class TestPlotBackends:
             with pytest.raises(MissingOptionalDependency, match=r"symbo\[viz\]"):
                 surface_tensor.plot_grid_with_path("x0", "x1", start=(0, 0), goal=(5, 7))
             return
-        fig = surface_tensor.plot_grid_with_path("x0", "x1", start=(0, 0),
-                                                 goal=(5, 7), n1=12, n2=12)
+        fig, path = surface_tensor.plot_grid_with_path("x0", "x1", start=(0, 0),
+                                                       goal=(5, 7), n1=12, n2=12)
         assert hasattr(fig, "savefig")
+        # the documented return is (figure, path); the path must be drawn
+        assert path and path[0] == (0, 0) and path[-1] == (5, 7)
 
 
 class TestTorchPathway:
@@ -96,14 +98,16 @@ class TestTorchPathway:
         torch = pytest.importorskip("torch")
         X, y = linear_problem
         nt = NanoTensor((1,), max_order=1, base_vars=["x0", "x1"])
-        nt.generate_taylor({"x0": 0.0, "x1": 0.0})
+        # ss_value=0 keeps the ansatz a pure coefficient model:
+        #   y = g_bias + g_x0*x0 + g_x1*x1
+        nt.generate_taylor({"x0": 0.0, "x1": 0.0}, ss_value=sp.S(0))
         trainer = HybridTrainer(nt)
         loader = HybridTrainer.make_loader(X, y, batch_size=16, shuffle=True)
         assert isinstance(loader, torch.utils.data.DataLoader)
         fitted = trainer.torch_fit(loader, epochs=400, lr=0.05)
         assert fitted["g_x0"] == pytest.approx(2.0, abs=0.05)
         assert fitted["g_x1"] == pytest.approx(-0.7, abs=0.05)
-        assert fitted["g_0"] == pytest.approx(1.5, abs=0.05)
+        assert fitted["g_bias"] == pytest.approx(1.5, abs=0.05)
 
     @pytest.mark.torch
     def test_torch_fit_rejects_bad_tensors(self, linear_problem):
@@ -131,7 +135,7 @@ class TestRegressionSearch:
     def test_symbolic_regression_returns_a_fitted_tensor(self, linear_problem):
         X, y = linear_problem
         trainer = HybridTrainer(NanoTensor((1,), base_vars=["x0", "x1"]))
-        best = trainer.symbolic_regression(X, y, max_deg=2, n_calls=6)
+        best = trainer.symbolic_regression(X, y, max_deg=2, n_calls=10)
         assert isinstance(best, NanoTensor)
         assert best.shape == (1,)
         # the docstring promises a *fitted* tensor, not a bare ansatz
