@@ -35,7 +35,7 @@ EQUATIONS = [
     # Euler equation (technology enters as exp(a): shocks are log deviations)
     c**(-1) - beta * cp**(-1) * (alpha * sp.exp(ap) * kp**(alpha - 1) + 1 - delta),
     # resource constraint
-    alpha * sp.exp(a) * k**alpha + (1 - delta) * k - c - kp,
+    sp.exp(a) * k**alpha + (1 - delta) * k - c - kp,
     # law of motion of the exogenous shock
     ap - rho * a,
 ]
@@ -65,9 +65,10 @@ class TestSteadyState:
         assert ss[a] == pytest.approx(0.0)
         expected_k = (alpha * beta / (1 - beta * (1 - delta))) ** (1 / (1 - alpha))
         assert ss[k] == pytest.approx(float(expected_k.subs(PARAMS)), rel=1e-6)
-        # output net of replacement investment is all consumed
-        resource = alpha * ss[k] ** alpha + (1 - delta) * ss[k] - ss[k]
+        # y = k^alpha, replacement investment is delta*k, the rest is consumed
+        resource = ss[k] ** alpha + (1 - delta) * ss[k] - ss[k]
         assert ss[c] == pytest.approx(float(resource.subs(PARAMS)), rel=1e-6)
+        assert ss[c] == pytest.approx(1.482937, rel=1e-5)
 
     def test_steady_state_residual_is_numeric_zero(self, solved):
         ss = solved["steady_state"]
@@ -76,40 +77,33 @@ class TestSteadyState:
             assert abs(float(eq.subs(subs))) < 1e-8
 
     def test_explicit_guess_reaches_the_same_fixed_point(self, solved):
-        ss_from_guess = solved["solver"].compute_steady_state({k: 8.7, c: 0.088})
+        ss_from_guess = solved["solver"].compute_steady_state({k: 8.7, c: 1.5})
         assert ss_from_guess[k] == pytest.approx(solved["steady_state"][k], rel=1e-6)
 
 
 class TestFirstOrder:
     def test_coefficients(self, solved):
         coeffs = solved["order1"].coefficients
-        # no adjustment costs: next-period capital is not driven by today's level
-        assert coeffs["g_k_k"] == pytest.approx(0.0, abs=1e-9)
-        assert coeffs["g_k_a"] == pytest.approx(12.246729, abs=1e-4)
-        assert coeffs["g_c_k"] == pytest.approx(0.952436, abs=1e-4)
-        assert coeffs["g_c_a"] == pytest.approx(-11.462058, abs=1e-4)
-
-    def test_consumption_slope_is_the_marginal_product(self, solved):
-        solution = solved["order1"]
-        k_ss = solution.steady_state[k]
-        marginal_product = alpha**2 * k_ss ** (alpha - 1) + 1 - delta
-        assert solution.coefficients["g_c_k"] == pytest.approx(
-            float(marginal_product.subs(PARAMS)), rel=1e-6)
+        # Blanchard-Kahn: capital is highly persistent, not rebuilt from scratch
+        assert 0.9 < coeffs["g_k_k"] < 0.96
+        assert coeffs["g_k_k"] == pytest.approx(0.910819, abs=1e-4)
+        assert coeffs["g_k_a"] == pytest.approx(1.612486, abs=1e-4)
+        assert coeffs["g_c_k"] == pytest.approx(0.099282, abs=1e-4)
+        assert coeffs["g_c_a"] == pytest.approx(0.567154, abs=1e-4)
 
     def test_linearised_resource_constraint_holds(self, solved):
-        """``k_next = alpha*k**alpha + (1-delta)*k - c`` linearised exactly."""
+        """``k_next = exp(a)*k**alpha + (1-delta)*k - c`` linearised exactly."""
         coeffs = solved["order1"].coefficients
         k_ss = solved["steady_state"][k]
-        mpk = float((alpha**2 * k_ss ** (alpha - 1)).subs(PARAMS))
+        mpk = float((alpha * k_ss ** (alpha - 1)).subs(PARAMS))
         assert coeffs["g_k_k"] + coeffs["g_c_k"] == pytest.approx(
-            mpk + 1 - PARAMS[delta], abs=1e-9)
+            mpk + 1 - PARAMS[delta], abs=1e-8)
         # capital and consumption together absorb the extra output of a shock
         c_ss = solved["steady_state"][c]
         assert coeffs["g_k_a"] + coeffs["g_c_a"] == pytest.approx(
-            float((alpha * k_ss**alpha).subs(PARAMS)), abs=1e-6)
-        # substituting the linear policies leaves only the truncated O(h^2) terms
+            float((k_ss**alpha).subs(PARAMS)), abs=1e-6)
         for h in (0.01, -0.02):
-            residual = (alpha * sp.exp(h) * k_ss**alpha + (1 - delta) * k_ss
+            residual = (sp.exp(h) * k_ss**alpha + (1 - delta) * k_ss
                         - (c_ss + coeffs["g_c_a"] * h) - (k_ss + coeffs["g_k_a"] * h))
             assert abs(float(residual.subs(PARAMS))) < 1e-3
 
@@ -136,20 +130,39 @@ class TestSecondOrder:
 
     def test_second_order_coefficients(self, solved):
         coeffs = solved["order2"].coefficients
-        assert coeffs["g_k_k_k"] == 0.0          # snapped, not 3e-13 of noise
-        assert coeffs["g_k_k_a"] == 0.0
-        assert coeffs["g_k_a_a"] == pytest.approx(17.221962, abs=1e-3)
-        assert coeffs["g_c_k_k"] == pytest.approx(-0.002384, abs=1e-4)
-        assert coeffs["g_c_k_a"] == pytest.approx(0.032436, abs=1e-4)
-        assert coeffs["g_c_a_a"] == pytest.approx(-16.437292, abs=1e-3)
+        assert coeffs["g_k_k_k"] == pytest.approx(-0.002846, abs=1e-4)
+        assert coeffs["g_k_k_a"] == pytest.approx(0.069283, abs=1e-4)
+        assert coeffs["g_k_a_a"] == pytest.approx(1.760139, abs=1e-3)
+        assert coeffs["g_c_k_k"] == pytest.approx(-0.003775, abs=1e-4)
+        assert coeffs["g_c_k_a"] == pytest.approx(0.020818, abs=1e-4)
+        assert coeffs["g_c_a_a"] == pytest.approx(0.419501, abs=1e-3)
 
     def test_risk_correction_is_half_the_curvature(self, solved):
         solution = solved["order2"]
-        assert solution.risk_corrections["h_k_sigma_sigma"] == pytest.approx(8.610981, abs=1e-3)
-        assert solution.risk_corrections["h_c_sigma_sigma"] == pytest.approx(-8.218646, abs=1e-3)
+        assert solution.risk_corrections["h_k_sigma_sigma"] == pytest.approx(0.880069, abs=1e-3)
+        assert solution.risk_corrections["h_c_sigma_sigma"] == pytest.approx(0.209751, abs=1e-3)
         for var in ("k", "c"):
             assert solution.risk_corrections[f"h_{var}_sigma_sigma"] == pytest.approx(
                 solution.coefficients[f"g_{var}_a_a"] / 2, rel=1e-9)
+
+    def test_independent_residual_catches_zero_persistence(self, solved):
+        """The residual harness must not reuse ``_variable_substitutions``."""
+        solver = solved["solver"]
+        good = solved["order2"]
+        ss = good.steady_state
+        point = {k: ss[k] + 1e-3, a: 1e-3}
+        assert solver._residual_at(good, point) < 1e-6
+
+        bad = PerturbationSolution()
+        bad.steady_state = dict(ss)
+        bad.first_order = {**good.first_order, "g_k_k": 0.0}
+        bad.second_order = {}
+        bad.policy_functions = solver._build_policy_functions(bad)
+        # a unit deviation is large enough that dropping capital persistence
+        # is economically impossible (residual of order one, not 1e-10)
+        far = {k: ss[k] + 1.0, a: 1.0}
+        assert solver._residual_at(bad, far) > 1.0
+        assert solver._residual_at(good, point) < solver._residual_at(bad, point)
 
     @pytest.mark.slow
     def test_variance_scales_the_correction_linearly(self, solved):
@@ -180,12 +193,11 @@ class TestPolicyFunctions:
         point = {"k": 9.0, "a": 0.05}
         from_expr = float(expr.subs({k: 9.0, a: 0.05, sp.Symbol("sigma"): 1.0}))
         assert solution.evaluate_policy("k", point) == pytest.approx(from_expr, rel=1e-9)
-        # a positive TFP shock raises next period's capital ...
+        # a positive TFP shock raises next period's capital *and* consumption
+        # (income effect: g_c_a ≈ 0.57)
         assert solution.evaluate_policy("k", {"k": 8.708785, "a": 0.05}) > \
             solution.evaluate_policy("k", {"k": 8.708785, "a": 0.0})
-        # ... and, at the margin, consumption reacts negatively (intertemporal
-        # substitution dominates the income effect in this calibration)
-        assert solution.evaluate_policy("c", {"k": 8.708785, "a": 0.05}) < \
+        assert solution.evaluate_policy("c", {"k": 8.708785, "a": 0.05}) > \
             solution.evaluate_policy("c", {"k": 8.708785, "a": 0.0})
 
     def test_unknown_variable_names_are_listed(self, solved):
@@ -232,7 +244,7 @@ class TestErrorsAndEdgeCases:
     def test_incomplete_model_is_reported_as_under_determined(self):
         """One equation for two endogenous variables cannot pin the policy down."""
         lone = SecondOrderPerturbation(
-            [alpha * sp.exp(a) * k**alpha + (1 - delta) * k - c - kp],
+            [sp.exp(a) * k**alpha + (1 - delta) * k - c - kp],
             [k], [c], [a], PARAMS, shock_persistence={a: rho})
         solution = lone.solve(order=1)
         assert solution.diagnostics["determined"] is False

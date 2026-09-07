@@ -29,7 +29,9 @@ symbo/
 
 ### 1. Atomic Primitives (`primitives.py`)
 
-Atomic operations derived from 318 classical algorithms.
+Atomic operations used as building blocks of the engine. There is no published
+mapping from a "318 classical algorithms" figure onto these primitives; see
+[`docs/algorithm-corpus.md`](docs/algorithm-corpus.md).
 
 **Usage:**
 ```python
@@ -180,7 +182,9 @@ payload = taylor.to_wasm_json()
 
 ### 4. Gröbner Basis Solver (`solver/groebner.py`)
 
-Streaming Gröbner basis computation with edge case handling.
+Streaming Gröbner basis computation with edge case handling. `NanoTensor.groebner_solve`
+returns all **real** solutions of a **zero-dimensional** system; inconsistent
+systems and positive-dimensional ideals raise instead of returning `[]`.
 
 **Usage:**
 ```python
@@ -240,8 +244,8 @@ kp, cp, ap = sp.symbols('k_next c_next a_next')
 equations = [
     # Euler equation
     c**(-1) - beta * cp**(-1) * (alpha * sp.exp(ap) * kp**(alpha - 1) + 1 - delta),
-    # resource constraint
-    alpha * sp.exp(a) * k**alpha + (1 - delta) * k - c - kp,
+    # resource constraint (y = exp(a) k^alpha)
+    sp.exp(a) * k**alpha + (1 - delta) * k - c - kp,
     # law of motion of the shock
     ap - rho * a,
 ]
@@ -249,12 +253,12 @@ params = {alpha: 0.36, beta: 0.99, delta: 0.08, rho: 0.9}
 
 solver = SecondOrderPerturbation(equations, [k], [c], [a], params,
                                 shock_persistence={a: rho})
-print(solver.compute_steady_state())        # {k: 8.708..., c: 0.0879..., a: 0.0}
+print(solver.compute_steady_state())        # {k: 8.708..., c: 1.4829..., a: 0.0}
 print(solver.determined, solver.n_effective_equations)   # True 2  (preflight check)
 
 solution = solver.solve(order=2, variance=1.0, verify_at=(1e-3, 1e-2, 1e-1))
 print(solution.diagnostics["determined"], solution.diagnostics["residual_h0.001"])
-print(solution.coefficients['g_k_a'])        # 12.2467...
+print(solution.coefficients['g_k_k'])        # ~0.91 (capital persistence)
 print(solution.diagnostics['residual_h0.001'])
 print(solution.policy_expression('c'))       # the c policy as a SymPy expression
 
@@ -275,6 +279,11 @@ quick = perturbation_solve(equations, [k], [c], [a], params,
   scalar applies to every shock, a `{shock: value}` dict per shock, `None` leaves
   the correction symbolic. `solution.risk_corrections['h_c_sigma_sigma']` is half of
   `g_c_a_a`, and the corrections are linear in the variance.
+- First-order conditions are quadratic in the policy coefficients (expectational
+  consistency). The solver uses damped Newton plus a Blanchard–Kahn filter
+  (state-transition eigenvalues inside the unit circle), not a one-shot linear
+  solve. Residuals are evaluated on the *raw* user equations, independently of
+  the substitution used to form the conditions.
 - `verify_at` (scalar or sequence of perturbation scales) fills `solution.diagnostics`
   with `residual_h<scale>` and `scaling_exponent`; residuals are what makes a
   solution trustworthy, so prefer it over trusting the linear algebra.
@@ -289,7 +298,11 @@ quick = perturbation_solve(equations, [k], [c], [a], params,
 
 ### 6. A* Pathfinding (`reasoning/a_star.py`)
 
-Symbolic state-based pathfinding on energy landscapes.
+Pathfinding on energy landscapes. Grid search is A* with an admissible
+Manhattan heuristic on non-negative costs (optimal) and SPFA/Bellman-Ford when
+cells can be negative. The symbolic pathfinder uses an L1 heuristic that is a
+lower bound on `edge_cost`; it returns a *low-cost* path, not a marketing
+"optimal path" over an arbitrary heuristic blend.
 
 **Usage:**
 ```python
@@ -389,7 +402,8 @@ print(tree.visualize_influence())
 
 ### 8. WASM Bindings (`wasm_bindings.py`)
 
-Browser-compatible interfaces for symbolic computation.
+WASM-*friendly* interfaces (JSON/msgpack-serializable signatures). No `.wasm`
+artifact or browser bundle is produced by this repository.
 
 **Usage:**
 ```python

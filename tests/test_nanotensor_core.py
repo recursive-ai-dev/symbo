@@ -315,6 +315,37 @@ class TestGridsAndPathfinding:
         assert path[0] == (0, 0) and path[-1] == (2, 2)
         # the cheap route stays in column 0 until the bottom row
         assert (0, 1) not in path and (1, 1) not in path
+        # non-negative grid + admissible heuristic => Dijkstra-optimal
+        import heapq
+        rng = np.random.default_rng(1)
+        G = rng.random((5, 5))
+        astar = NanoTensor.find_path_on_grid(G, (0, 0), (4, 4), mode="min")
+        assert astar and astar[0] == (0, 0) and astar[-1] == (4, 4)
+
+        def dijkstra(grid, start, goal):
+            rows, cols = grid.shape
+            pq = [(0.0, start)]
+            dist = {start: 0.0}
+            came = {}
+            while pq:
+                d, cur = heapq.heappop(pq)
+                if cur == goal:
+                    break
+                if d != dist[cur]:
+                    continue
+                i, j = cur
+                for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    ni, nj = i + di, j + dj
+                    if 0 <= ni < rows and 0 <= nj < cols:
+                        nd = d + float(grid[ni, nj])
+                        if nd < dist.get((ni, nj), float("inf")):
+                            dist[(ni, nj)] = nd
+                            came[(ni, nj)] = cur
+                            heapq.heappush(pq, (nd, (ni, nj)))
+            return dist[goal]
+
+        astar_cost = sum(float(G[i, j]) for i, j in astar[1:])
+        assert astar_cost == pytest.approx(dijkstra(G, (0, 0), (4, 4)))
 
     def test_find_path_on_grid_terminates_on_negative_landscape(self):
         # Negative entries make the naive A* re-open expanded nodes, which can
@@ -384,10 +415,15 @@ class TestPolynomialAndCurve:
         assert got == sp.expand(sp.resultant(x + y - 2, x - y, y))
         assert y not in got.free_symbols  # y really was eliminated
 
-        circle = x**2 + y**2 - 1
-        px, py = nt.parametrize_curve(circle, t=t)
+        folium = x**3 + y**3 - 3 * x * y
+        px, py = nt.parametrize_curve(folium, t=t)
         # the parametrisation must satisfy the implicit equation identically
-        assert sp.simplify(px**2 + py**2 - 1) == 0
+        assert sp.simplify(px**3 + py**3 - 3 * px * py) == 0
+        yp = sp.symbols("yp")
+        with pytest.raises(ValueError, match="extra symbols"):
+            nt.parametrize_curve(yp**2 + 3 * yp - 2 * y - 3 * x, t=t)
+        with pytest.raises(ValueError, match="singular"):
+            nt.parametrize_curve(x**2 + y**2 - 1, t=t)
 
     def test_solve_poly_failure_is_logged_not_printed(self, caplog):
         import logging

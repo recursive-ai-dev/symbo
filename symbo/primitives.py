@@ -9,9 +9,10 @@
 Symbo Atomic Primitives Module
 ================================
 
-This module implements the atomic computational components derived from the
-deconstruction of 318 classical algorithms across algebra, optimization, dynamics,
-and computational geometry.
+This module implements the atomic computational components used across algebra,
+optimization, dynamics, and computational geometry. A historical marketing
+figure of "318 classical algorithms" is not a published catalogue; the
+operations actually implemented here are listed on :class:`AtomicPrimitives`.
 
 Each primitive is designed to be:
 - Mathematically exact (symbolic correctness)

@@ -10,8 +10,8 @@ A* Pathfinding on Symbolic Energy Landscapes
 =============================================
 
 This module implements A* pathfinding where nodes are symbolic states
-on an energy landscape (manifold), and the heuristic is derived from
-variable influence mapping.
+on an energy landscape (manifold). The heuristic is L1 distance in state
+space (admissible for the axis-aligned neighbour graph).
 
 The path cost function uses symbolic energy differences between states,
 connecting reasoning logic with core Symbo features.
@@ -161,7 +161,7 @@ class SymbolicAStarPathfinder:
     This class implements A* search where:
     - Nodes are symbolic states on a manifold
     - Edge costs are energy differences
-    - Heuristic is derived from variable influence
+    - Heuristic is L1 distance (admissible for axis-aligned steps)
 
     Parameters
     ----------
@@ -215,12 +215,12 @@ class SymbolicAStarPathfinder:
                   state: Dict[sp.Symbol, float],
                   goal: Dict[sp.Symbol, float]) -> float:
         """
-        Compute heuristic estimate of cost to goal.
+        Admissible heuristic: L1 (Manhattan) distance in state space.
 
-        Uses a combination of:
-        1. Euclidean distance (geometric component)
-        2. Energy difference (landscape component)
-        3. Influence-weighted distance (gradient component)
+        Neighbours move one coordinate by ``step_size`` and ``edge_cost`` is at
+        least that Euclidean step, so remaining cost is at least
+        ``sum_i |s_i - g_i|``. A weighted blend of energy and influence is
+        *not* a lower bound on ``edge_cost`` and is not used.
 
         Parameters
         ----------
@@ -234,33 +234,10 @@ class SymbolicAStarPathfinder:
         float
             Heuristic cost estimate
         """
-        # Geometric distance
-        euclidean = np.sqrt(sum(
-            (state.get(var, 0) - goal.get(var, 0))**2
+        return float(sum(
+            abs(state.get(var, 0.0) - goal.get(var, 0.0))
             for var in self.variables
         ))
-
-        # Energy difference
-        try:
-            energy_current = self.landscape.energy(state)
-            energy_goal = self.landscape.energy(goal)
-            energy_diff = abs(energy_goal - energy_current)
-        except Exception:
-            energy_diff = 0.0
-
-        # Influence-weighted component
-        try:
-            influence = self.landscape.influence_map(state)
-            weighted_dist = sum(
-                influence.get(var, 1.0) * abs(state.get(var, 0) - goal.get(var, 0))
-                for var in self.variables
-            )
-        except Exception:
-            weighted_dist = euclidean
-
-        # Combine components
-        # Weight geometric distance more to ensure admissibility
-        return 0.5 * euclidean + 0.3 * energy_diff + 0.2 * weighted_dist
 
     def edge_cost(self,
                   state1: Dict[sp.Symbol, float],
@@ -366,7 +343,7 @@ class SymbolicAStarPathfinder:
                   max_iterations: int = 10000,
                   tolerance: float = 0.1) -> List[Dict[sp.Symbol, float]]:
         """
-        Find optimal path from start to goal using A*.
+        Find a minimum-cost path from start to goal using A*.
 
         Parameters
         ----------

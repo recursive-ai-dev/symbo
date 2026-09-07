@@ -108,7 +108,7 @@ def demo_rbc_perturbation(ss_guess: Optional[Dict[str, float]] = None,
     params = {alpha: 0.36, beta: 0.99, delta: 0.08, rho: 0.9}
     equations = [
         c ** (-1) - beta * cp ** (-1) * (alpha * sp.exp(ap) * kp ** (alpha - 1) + 1 - delta),
-        alpha * sp.exp(a) * k ** alpha + (1 - delta) * k - c - kp,
+        sp.exp(a) * k ** alpha + (1 - delta) * k - c - kp,
         ap - rho * a,
     ]
 
@@ -171,48 +171,46 @@ def demo_rbc_perturbation(ss_guess: Optional[Dict[str, float]] = None,
 
 def demo_kamke_ade():
     """
-    Demonstration: algebraic differential equation (ADE) example.
+    Curve parametrization, then a genuine ADE parametrization.
 
-    Uses a Kamke-style ADE of the form:
-
-        y'^2 + 3 y' - 2 y - 3 x = 0
-
-    to illustrate the curve parametrization approach implemented in
-    `NanoTensor.parametrize_curve`. The function:
-
-    - constructs the ADE in SymPy,
-    - derives a parametric representation (x(t), y(t)),
-    - and prints the resulting parameterization and a related general solution.
-
-    This serves primarily as a conceptual example of symbolic curve handling.
+    1. The folium of Descartes ``x³ + y³ − 3xy = 0`` is singular at the origin,
+       so :meth:`NanoTensor.parametrize_curve` returns the textbook rational
+       map ``(3t/(1+t³), 3t²/(1+t³))``.
+    2. The Kamke ADE ``(y')² + 3 y' − 2 y − 3 x = 0`` is *not* a plane curve
+       in ``(x, y)``. Setting ``y' = t`` and differentiating the resulting
+       relation eliminates ``x`` and yields a true parametric pair
+       ``(x(t), y(t))`` with no leftover derivative.
     """
     print("\n=== Kamke ADE Demo ===")
 
-    x, y, yp = sp.symbols('x y yp')
-    F = yp**2 + 3*yp - 2*y - 3*x
-
+    x, y, t = sp.symbols('x y t')
     nt = NanoTensor((1,))
-    x_param, y_param = nt.parametrize_curve(F)
+    folium = x**3 + y**3 - 3 * x * y
+    x_param, y_param = nt.parametrize_curve(folium, t=t)
+    print(f"Folium parametrization: (x(t), y(t)) = ({x_param}, {y_param})")
 
-    print(f"Parametrization: (x(t), y(t)) = ({x_param}, {y_param})")
-
-    # Verify solution: integrate the explicit branch of the ADE
-    y_sol = sp.integrate(sp.solve(F, yp)[1], x)
-    print(f"General solution: y(x) = {y_sol}")
+    # ADE: y'^2 + 3 y' - 2 y - 3 x = 0. Set y' = t:
+    #   y = (t**2 + 3*t - 3*x)/2
+    # Differentiate w.r.t. the parameter, using dy/dx = t:
+    #   t x' = (2t + 3 - 3 x')/2  =>  x'(2t + 3) = 2t + 3
+    # so x' = 1 (t != -3/2) and x = t + C.
+    C = sp.Symbol('C')
+    x_ade = t + C
+    y_ade = sp.simplify((t**2 + 3 * t - 3 * x_ade) / 2)
+    print(f"ADE parametrization: (x(t), y(t)) = ({x_ade}, {y_ade})")
+    print("  (parameter t is y'; C is an integration constant)")
 
     return x_param, y_param
 
 def benchmark_performance():
     """
-    Compare symbolic and numeric differentiation performance.
+    Time symbolic vs numeric differentiation. **Not a like-for-like comparison.**
 
-    Benchmarks:
-
-    - symbolic differentiation via `NanoTensor` over a 100x100 tensor, and
-    - numeric differentiation via `numpy.gradient` over a random 100x100 array.
-
-    Prints timing information and a speed ratio, illustrating the cost of
-    exact symbolic operations relative to purely numeric ones.
+    Times ``NanoTensor.diff_cached`` on a 100x100 tensor of default (mostly
+    zero) expressions against ``numpy.gradient`` on random floats: an exact
+    symbolic derivative versus a finite difference, on different data. The
+    ratio is hardware- and expression-dependent (hundreds-to-thousands x on
+    a typical laptop) and is printed as a measurement, not a product claim.
     """
     print("\n=== Performance Benchmark ===")
 
@@ -230,7 +228,8 @@ def benchmark_performance():
 
     print(f"Symbolic diff: {sym_time:.4f}s")
     print(f"Numeric diff: {num_time:.4f}s")
-    print(f"Speed ratio: {sym_time/num_time:.2f}x (symbolic is slower but exact)")
+    print(f"Speed ratio: {sym_time/num_time:.2f}x "
+          "(symbolic is slower; this is exact diff vs finite difference, not autodiff)")
 
     return sym_time, num_time
 

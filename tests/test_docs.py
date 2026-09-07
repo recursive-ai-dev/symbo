@@ -7,8 +7,8 @@
 
 """Executable documentation: every ``python`` block in the docs must run.
 
-The README and MODULES.md carry the API surface most users read first, so their
-examples are treated as tests. Each block is executed in a fresh interpreter from
+The README, MODULES.md and the military-grade guides carry the API surface most
+users read first, so their examples are treated as tests. Each block is executed in a fresh interpreter from
 the repository root with a timeout; a block that prints is fine, a block that
 raises is a documentation bug.
 
@@ -24,7 +24,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DOCS = ["README.md", "MODULES.md"]
+DOCS = [
+    "README.md",
+    "MODULES.md",
+    "README_MILITARY_GRADE.md",
+    "docs/MILITARY_GRADE_NANOTENSOR.md",
+]
 
 BLOCK_RE = re.compile(r"```(?:python|py3|py)\n(.*?)```", re.DOTALL)
 
