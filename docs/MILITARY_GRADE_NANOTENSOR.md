@@ -30,7 +30,7 @@ The NanoTensor now has **agency** - the ability to perceive, reason, learn, and 
 #### Example Usage:
 
 ```python
-from symbo.symbo import NanoTensor
+from symbo import NanoTensor
 import sympy as sp
 
 # Create a military-grade NanoTensor
@@ -82,7 +82,7 @@ The NanoTensor continuously monitors its own health and adjusts behavior accordi
 
 #### Example Usage:
 
-```python
+```text
 # Perform some operations
 for i in range(100):
     nt.diff(x)
@@ -132,7 +132,7 @@ Based on learned patterns, the system:
 
 #### Example:
 
-```python
+```text
 # Create tensor with complex expressions
 nt = NanoTensor((1,), max_order=2)
 nt.data[0] = (x**10 + y**10) / (x - y + 0.001)
@@ -166,7 +166,7 @@ Military-grade systems require robust input validation and security checks.
 
 #### Example Usage:
 
-```python
+```text
 # Set security bounds for variables
 nt.set_validation_bounds('x', -10.0, 10.0)
 nt.set_validation_bounds('y', -5.0, 5.0)
@@ -199,7 +199,7 @@ The system attempts autonomous recovery when operations fail.
 
 #### Example:
 
-```python
+```text
 # Create problematic expression
 nt.data[0] = (x**100 + y**100) / (x - y)
 
@@ -228,7 +228,7 @@ The system continuously optimizes itself for better performance.
 
 #### Cache Performance:
 
-```python
+```text
 # Cached operations are much faster
 import time
 
@@ -257,7 +257,7 @@ The military-grade NanoTensor can be directly embedded into agents to provide th
 
 ### Example: Autonomous Agent with NanoTensor Brain
 
-```python
+```text
 class SymbolicAgent:
     """An autonomous agent with a NanoTensor brain."""
     
@@ -338,7 +338,7 @@ for t in range(100):
 Get comprehensive health diagnostics.
 
 **Returns:**
-```python
+```text
 {
     'status': 'optimal',  # optimal, good, degraded, critical
     'metrics': {
@@ -365,7 +365,7 @@ Get comprehensive health diagnostics.
 Get agency and learning status.
 
 **Returns:**
-```python
+```text
 {
     'experiences_recorded': 150,
     'patterns_learned': 4,
@@ -386,7 +386,7 @@ Set security validation bounds for a variable.
 - `upper`: Maximum allowed value
 
 **Example:**
-```python
+```text
 nt.set_validation_bounds('x', -10.0, 10.0)
 ```
 
@@ -416,7 +416,7 @@ The military-grade enhancements add minimal overhead:
 ## Best Practices
 
 ### 1. Set Validation Bounds Early
-```python
+```text
 # Set bounds immediately after creation
 nt = NanoTensor((2,), max_order=2)
 for var in ['x', 'y', 'z']:
@@ -424,7 +424,7 @@ for var in ['x', 'y', 'z']:
 ```
 
 ### 2. Check Health Periodically
-```python
+```text
 # In long-running applications
 if iteration % 100 == 0:
     health = nt.health_check()
@@ -434,7 +434,7 @@ if iteration % 100 == 0:
 ```
 
 ### 3. Monitor Agency Status
-```python
+```text
 # Get recommendations for optimization
 status = nt.get_agency_status()
 for rec in status['recommendations']:
@@ -442,7 +442,7 @@ for rec in status['recommendations']:
 ```
 
 ### 4. Let the System Learn
-```python
+```text
 # Don't clear caches too aggressively
 # The system learns optimal cache strategies
 # Only clear if memory is critically constrained

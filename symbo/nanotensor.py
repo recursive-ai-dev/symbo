@@ -34,7 +34,8 @@ generative symbolic architecture. Symbo aims to:
 - and expose reasoning tools such as A*-based pathfinding over symbolic energy
   landscapes.
 
-The module also includes WASM-friendly entry points for browser runtimes,
+The module also includes WASM-friendly (JSON-serializable) entry points; this
+repository does not produce a ``.wasm`` artifact. It also includes
 serialization helpers (MessagePack and Arrow), and demonstration routines for:
 
 - a 2nd-order perturbation solution of an RBC-style model (`demo_rbc_perturbation`),
@@ -67,7 +68,7 @@ import os
 import pickle
 import time
 import warnings
-from collections import Counter
+from collections import Counter, deque
 from itertools import combinations_with_replacement
 from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
@@ -784,9 +785,23 @@ class NanoTensor:
         return recommendations
 
     @staticmethod
-    def _heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Manhattan distance heuristic for A* on a grid."""
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    def _heuristic(a: Tuple[int, int], b: Tuple[int, int], step_cost: float = 1.0) -> float:
+        """Admissible Manhattan heuristic: never exceeds remaining path cost."""
+        return (abs(a[0] - b[0]) + abs(a[1] - b[1])) * float(step_cost)
+
+    @staticmethod
+    def _reconstruct_path(came_from: Dict[Tuple[int, int], Tuple[int, int]],
+                          current: Tuple[int, int]) -> List[Tuple[int, int]]:
+        path = [current]
+        seen = {current}
+        while current in came_from:
+            current = came_from[current]
+            if current in seen:
+                break
+            seen.add(current)
+            path.append(current)
+        path.reverse()
+        return path
 
     @staticmethod
     def find_path_on_grid(Z: np.ndarray,
@@ -794,17 +809,23 @@ class NanoTensor:
                           goal: Tuple[int, int],
                           mode: str = "min") -> List[Tuple[int, int]]:
         """
-        A* pathfinding on a 2D cost grid Z.
+        Shortest path on a 2D cost grid ``Z``.
+
+        On non-negative grids this is A* with an admissible heuristic
+        ``h = manhattan * min(Z)`` (Dijkstra when the minimum cell is 0), so
+        the returned path is optimal. Negative cell costs make A* inadmissible;
+        those landscapes are solved with SPFA/Bellman-Ford (optimal if there is
+        no negative cycle) and fall back to a simple no-revisit path otherwise.
 
         Args:
-            Z: 2D array of costs.
+            Z: 2D array of cell costs (paid when entering a cell).
             start: (i, j) start index into Z.
             goal: (i, j) goal index into Z.
             mode: 'min' to prefer low Z (valley-following),
                   'max' to prefer high Z (ridge-following).
 
         Returns:
-            List of (i, j) indices representing the path.
+            List of (i, j) indices representing the path, or ``[]``.
         """
         rows, cols = Z.shape
         (si, sj) = start
@@ -813,11 +834,8 @@ class NanoTensor:
         if not (0 <= si < rows and 0 <= sj < cols and 0 <= gi < rows and 0 <= gj < cols):
             raise ValueError("Start or goal index out of bounds for Z.")
 
-        # If maximizing, flip cost sign
-        if mode == "max":
-            cost_grid = -Z
-        else:
-            cost_grid = Z
+        # If maximizing, flip cost sign (may introduce negatives).
+        cost_grid = np.asarray(-Z if mode == "max" else Z, dtype=float)
 
         def neighbors(i, j):
             for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -825,37 +843,72 @@ class NanoTensor:
                 if 0 <= ni < rows and 0 <= nj < cols:
                     yield ni, nj
 
+        min_cost = float(np.min(cost_grid))
+        if min_cost >= 0.0:
+            # Admissible A*: each step costs at least min_cost (Dijkstra if 0).
+            open_set = []
+            heapq.heappush(open_set, (0.0, start))
+            came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
+            g_score = {start: 0.0}
+            expanded: set = set()
+            while open_set:
+                _, current = heapq.heappop(open_set)
+                if current in expanded:
+                    continue
+                expanded.add(current)
+                if current == goal:
+                    return NanoTensor._reconstruct_path(came_from, current)
+                for nb in neighbors(*current):
+                    if nb in expanded:
+                        continue
+                    tentative_g = g_score[current] + float(cost_grid[nb])
+                    if tentative_g < g_score.get(nb, float("inf")):
+                        came_from[nb] = current
+                        g_score[nb] = tentative_g
+                        f = tentative_g + NanoTensor._heuristic(nb, goal, min_cost)
+                        heapq.heappush(open_set, (f, nb))
+            return []
+
+        # Negative cells: SPFA / Bellman-Ford. Cap relaxations per node at V
+        # so a negative cycle cannot loop forever.
+        n_nodes = rows * cols
+        came_from = {}
+        g_score = {start: 0.0}
+        queue = deque([start])
+        in_queue = {start}
+        relax_count = {start: 0}
+        negative_cycle = False
+        while queue and not negative_cycle:
+            current = queue.popleft()
+            in_queue.discard(current)
+            for nb in neighbors(*current):
+                tentative_g = g_score[current] + float(cost_grid[nb])
+                if tentative_g < g_score.get(nb, float("inf")):
+                    came_from[nb] = current
+                    g_score[nb] = tentative_g
+                    relax_count[nb] = relax_count.get(current, 0) + 1
+                    if relax_count[nb] >= n_nodes:
+                        negative_cycle = True
+                        break
+                    if nb not in in_queue:
+                        queue.append(nb)
+                        in_queue.add(nb)
+        if not negative_cycle and goal in g_score:
+            return NanoTensor._reconstruct_path(came_from, goal)
+
+        # Negative cycle (or unreachable): a simple no-revisit path, not optimal.
         open_set = []
         heapq.heappush(open_set, (0.0, start))
-
-        came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        came_from = {}
         g_score = {start: 0.0}
-        # ``Z`` is a *value/cost* landscape and may contain negative entries.
-        # Without a closed set a node can be re-opened after expansion, which
-        # can write a parent pointer back into one of its own ancestors and
-        # make the goal-path reconstruction loop forever. Expanding every node
-        # at most once bounds the search and keeps the parent graph acyclic.
-        expanded: set = set()
-
+        expanded = set()
         while open_set:
             _, current = heapq.heappop(open_set)
             if current in expanded:
                 continue
             expanded.add(current)
-
             if current == goal:
-                # reconstruct path (cycle-guarded defensively)
-                path = [current]
-                seen = {current}
-                while current in came_from:
-                    current = came_from[current]
-                    if current in seen:
-                        break
-                    seen.add(current)
-                    path.append(current)
-                path.reverse()
-                return path
-
+                return NanoTensor._reconstruct_path(came_from, current)
             for nb in neighbors(*current):
                 if nb in expanded:
                     continue
@@ -863,10 +916,7 @@ class NanoTensor:
                 if tentative_g < g_score.get(nb, float("inf")):
                     came_from[nb] = current
                     g_score[nb] = tentative_g
-                    f = tentative_g + NanoTensor._heuristic(nb, goal)
-                    heapq.heappush(open_set, (f, nb))
-
-        # No path found
+                    heapq.heappush(open_set, (tentative_g, nb))
         return []
 
     @staticmethod
@@ -1304,7 +1354,13 @@ class NanoTensor:
     def groebner_solve(self, poly_system: List[sp.Expr],
                    vars_to_solve: Optional[List[sp.Symbol]] = None) -> List[Dict[str, sp.Expr]]:
         """
-        Solve a polynomial system using Gröbner bases and filter for real solutions.
+        Solve a zero-dimensional polynomial system; return its *real* solutions.
+
+        Complex roots are dropped (undocumented in older manuals that claimed
+        "every possible exact solution"). An inconsistent system and a
+        positive-dimensional ideal are no longer reported as the same empty
+        list: they raise :class:`~symbo.solver.groebner.InconsistentPolynomialSystem`
+        and :class:`~symbo.solver.groebner.PositiveDimensionalIdeal` respectively.
 
         Parameters
         ----------
@@ -1318,31 +1374,48 @@ class NanoTensor:
         -------
         list[dict[str, sympy.Expr]]
             Real-valued solutions, represented as dictionaries mapping
-            variable names to SymPy expressions. Returns an empty list if
-            solving fails or no real solutions are found.
+            variable names to SymPy expressions. An empty list means the
+            system is zero-dimensional and has no real roots (e.g. ``x**2+1``).
         """
+        from symbo.solver.groebner import (
+            GroebnerSolveError,
+            InconsistentPolynomialSystem,
+            PositiveDimensionalIdeal,
+            handle_infinite_solutions,
+        )
+
         if vars_to_solve is None:
             vars_to_solve = self.symvars[:len(poly_system)]
         try:
-            # The reduced Groebner basis generates the same solution set as the
-            # input system but is triangular, so solving it is usually cheaper
-            # and more robust than solving the original system directly.
             G = groebner(poly_system, *vars_to_solve, order='lex')
+            basis = list(G.polys)
+            if any(sp.simplify(p - 1) == 0 for p in basis):
+                raise InconsistentPolynomialSystem(
+                    "polynomial system is inconsistent (Gröbner basis contains 1)"
+                )
+            info = handle_infinite_solutions(basis, list(vars_to_solve))
+            if info.get("has_infinite_solutions"):
+                raise PositiveDimensionalIdeal(info)
             try:
-                solutions = solve(list(G.polys), *vars_to_solve, dict=True)
+                solutions = solve(basis, *vars_to_solve, dict=True)
             except Exception as exc:
                 logger.debug("groebner_solve(): basis solve failed (%r), solving input system", exc)
                 solutions = solve(poly_system, *vars_to_solve, dict=True)
 
-            # Filter solutions with real values
             real_solutions = []
-            for sol in solutions:
-                if all(abs(v.as_real_imag()[1]) < 1e-8 for v in sol.values()):
-                    real_solutions.append({str(k): v for k, v in sol.items()})
+            for sol in solutions or []:
+                try:
+                    if all(abs(complex(sp.N(v.as_real_imag()[1]))) < 1e-8
+                           for v in sol.values()):
+                        real_solutions.append({str(k): v for k, v in sol.items()})
+                except (TypeError, ValueError):
+                    continue
             return real_solutions
+        except GroebnerSolveError:
+            raise
         except Exception as e:
             logger.warning("groebner_solve() failed: %s", e)
-            return []
+            raise GroebnerSolveError(f"groebner_solve() failed: {e}") from e
 
     def resultant(self, f: sp.Expr, g: sp.Expr, var: sp.Symbol) -> sp.Expr:
         """Compute resultant of two polynomials with respect to variable"""
@@ -1351,34 +1424,46 @@ class NanoTensor:
     def parametrize_curve(self, implicit_poly: sp.Expr,
                           t: Optional[sp.Symbol] = None) -> Tuple[sp.Expr, sp.Expr]:
         """
-        Parametrize algebraic curve via line intersection + resultant.
-        Implements the method from ScienceDirect PDF (Winkler).
-        For curve f(x,y)=0, uses line y=tx through singular point.
+        Rational parametrization of a plane curve that is singular at the origin.
+
+        Uses a pencil of lines ``y = t x`` through ``(0, 0)`` (Winkler). The
+        implicit polynomial must be a curve in ``x, y`` only, and must satisfy
+        ``f(0,0) = f_x(0,0) = f_y(0,0) = 0``. Extra free symbols (e.g. a
+        leftover ``y'`` from an ADE) are rejected rather than treated as
+        constants.
         """
         if t is None:
             t = sp.Symbol('t')
         x, y = sp.symbols('x y')
 
-        # Ensure implicit_poly is in terms of x,y
         implicit_poly = safe_sympify(implicit_poly)
+        extra = implicit_poly.free_symbols - {x, y, t}
+        if extra:
+            raise ValueError(
+                "parametrize_curve() only accepts a plane curve in x, y "
+                f"(parameter t); extra symbols {sorted(str(s) for s in extra)}. "
+                "For an ADE, eliminate y' first."
+            )
+        f00 = sp.simplify(implicit_poly.subs({x: 0, y: 0}))
+        fx0 = sp.simplify(sp.diff(implicit_poly, x).subs({x: 0, y: 0}))
+        fy0 = sp.simplify(sp.diff(implicit_poly, y).subs({x: 0, y: 0}))
+        if f00 != 0 or fx0 != 0 or fy0 != 0:
+            raise ValueError(
+                "parametrize_curve() uses a pencil of lines through the origin, "
+                "so the curve must be singular at (0, 0). "
+                "The folium of Descartes x**3 + y**3 - 3*x*y is a typical example."
+            )
 
-        # Line through origin (assuming singular point at origin)
         line = y - t * x
-
-        # Compute resultant to eliminate y
         res_y = resultant(implicit_poly, line, y)
-
-        # Solve for x in terms of t
         x_sols = sp.solve(res_y, x)
-        # Filter out trivial solution (x=0)
         non_trivial = [sol for sol in x_sols if sol != 0]
 
         if non_trivial:
             x_param = sp.simplify(non_trivial[-1])
             y_param = sp.simplify(t * x_param)
             return x_param, y_param
-        else:
-            return x, y
+        return x, y
 
     def generate_taylor(self, center: Dict[str, float], ss_value: sp.Expr = None,
                         include_bias: bool = True):
@@ -1606,7 +1691,19 @@ class NanoTensor:
         single-residual models this tensor is designed around. For general
         multi-equation systems use :mod:`symbo.analytics.perturbation`, which
         solves the linearized system jointly.
+
+        .. deprecated::
+            Prefer :class:`~symbo.analytics.perturbation.SecondOrderPerturbation`.
+            This helper is untested and has hung on realistic RBC residuals.
         """
+        warnings.warn(
+            "NanoTensor.full_perturbation is deprecated; use "
+            "symbo.analytics.perturbation.SecondOrderPerturbation. "
+            "This helper is untested and may hang.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._last_perturbation_failed = False
         if var_order is None:
             var_order = ['k', 'a', 'eps', 'sig']
 
@@ -1720,6 +1817,7 @@ class NanoTensor:
             except Exception as e:
                 logger.warning("Failed to solve sigma term: %s", e)
                 self.fitted_coeffs[coeff_name] = 0.0
+                self._last_perturbation_failed = True
 
         # Apply solution to tensor (every element, not just the first).
         solved = self.subs({sp.Symbol(k): v for k, v in self.fitted_coeffs.items()})
@@ -1808,6 +1906,11 @@ class NanoTensor:
                      n2: int = 100) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Sample the scalar tensor value over a 2D grid in (var1, var2).
+
+        Call this on a *fitted* tensor (or one whose every free symbol is
+        either ``var1``, ``var2`` or listed in ``fixed``). A default
+        ``max_order=2`` Taylor ansatz still contains unfitted coefficient
+        symbols and raises ``ValueError: N symbol(s) have no numeric value``.
 
         This helper evaluates the tensor at a grid of points, holding all other
         variables fixed. It is primarily used to support contour and surface
@@ -2095,8 +2198,10 @@ class SymbolicTrainer:
                 maps variable names to numeric values.
 
             For 'perturbation':
-                A list where the first element is (model_R, params_dict),
-                i.e. a residual expression and parameter dictionary.
+                A list whose first element is
+                ``(equations, state_vars, control_vars, shock_vars, params)``
+                (optional ``shock_persistence``, ``ss_guess``). The historic
+                ``(model_R, params)`` form is deprecated.
 
         method : {'symbolic', 'perturbation', 'lsq'}
             Fitting strategy to employ.
@@ -2109,23 +2214,83 @@ class SymbolicTrainer:
         if method == 'symbolic':
             return self._fit_symbolic(data)
         elif method == 'perturbation':
-            if len(data) >= 1:
-                # Accept either [ (model_R, params) ], [ (model_R, params, ss_guess) ], or [model_R, params, ss_guess]
-                if isinstance(data[0], tuple) and len(data[0]) in (2, 3):
-                    model_R, params, *maybe_guess = data[0]
-                elif len(data) >= 2:
-                    model_R, params, *maybe_guess = [*data, None]
-                else:
-                    return False
-
-                ss_guess = maybe_guess[0] if maybe_guess else None
-                self.nt.full_perturbation(model_R, params, ss_guess=ss_guess)
-                self.fitted_coeffs = getattr(self.nt, 'fitted_coeffs', {})
-                return len(self.fitted_coeffs) > 0
+            return self._fit_perturbation(data)
         elif method == 'lsq':
             return self._fit_lsq(data)
 
         return False
+
+    def _fit_perturbation(self, data: List[Any]) -> bool:
+        """
+        Fit via :class:`~symbo.analytics.perturbation.SecondOrderPerturbation`.
+
+        Canonical payload::
+
+            [(equations, state_vars, control_vars, shock_vars, params)]
+            [(equations, state_vars, control_vars, shock_vars, params,
+              shock_persistence, ss_guess)]
+
+        The historic single-residual form ``[(model_R, params)]`` still works
+        but emits :class:`DeprecationWarning` and routes through the fragile
+        ``full_perturbation`` helper; ``fit`` returns ``False`` if that path
+        logs a solver failure.
+        """
+        if not data:
+            return False
+        payload = data[0] if isinstance(data[0], tuple) else tuple(data)
+
+        if len(payload) >= 5 and isinstance(payload[0], (list, tuple)):
+            from symbo.analytics.perturbation import SecondOrderPerturbation
+
+            equations, state_vars, control_vars, shock_vars, params, *rest = payload
+            shock_persistence = rest[0] if rest else None
+            ss_guess = rest[1] if len(rest) > 1 else None
+            try:
+                solver = SecondOrderPerturbation(
+                    list(equations), state_vars, control_vars, shock_vars, params,
+                    shock_persistence=shock_persistence,
+                )
+                solution = solver.solve(order=min(2, self.nt.max_order),
+                                        initial_guess=ss_guess)
+            except Exception as exc:
+                logger.warning("fit(method='perturbation') failed: %r", exc)
+                return False
+            if not solution.converged or not solution.coefficients:
+                return False
+            self.fitted_coeffs = {name: float(value)
+                                  for name, value in solution.coefficients.items()}
+            try:
+                self.nt.data.flat[0] = solution.policy_expression(
+                    next(iter(solution.policy_functions))
+                )
+                self.nt._invalidate_caches()
+            except Exception as exc:
+                logger.warning("could not install policy on the tensor: %r", exc)
+            return True
+
+        warnings.warn(
+            "fit(method='perturbation') with a single residual is deprecated; "
+            "pass (equations, state_vars, control_vars, shock_vars, params) "
+            "to use SecondOrderPerturbation. full_perturbation() is untested "
+            "and may hang on realistic models.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        if len(payload) >= 2:
+            model_R, params, *maybe_guess = (*payload, None)
+        else:
+            return False
+        ss_guess = maybe_guess[0] if maybe_guess else None
+        before = dict(getattr(self.nt, "fitted_coeffs", {}))
+        try:
+            coeffs = self.nt.full_perturbation(model_R, params, ss_guess=ss_guess)
+        except Exception as exc:
+            logger.warning("full_perturbation failed: %r", exc)
+            return False
+        self.fitted_coeffs = dict(coeffs or getattr(self.nt, "fitted_coeffs", {}))
+        if getattr(self.nt, "_last_perturbation_failed", False):
+            return False
+        return len(self.fitted_coeffs) > len(before) or bool(self.fitted_coeffs)
 
     def _fit_symbolic(self, data: List[Tuple[Dict[str, float], float]]) -> bool:
         """
@@ -2158,7 +2323,11 @@ class SymbolicTrainer:
             nt_val = sum(self.nt.subs(subs_d).data.flat)
             equations.append(sp.Eq(nt_val, target))
 
-        sols = self.nt.groebner_solve(equations, coeffs_sym)
+        try:
+            sols = self.nt.groebner_solve(equations, coeffs_sym)
+        except Exception as exc:
+            logger.warning("_fit_symbolic(): groebner_solve failed: %r", exc)
+            return False
         if sols:
             sol_dict = {k: float(v.evalf()) for k, v in sols[0].items()}
             self._apply_solution(sol_dict)
@@ -2565,5 +2734,3 @@ class KnowledgeBase:
             return float(value)
         except (TypeError, ValueError):
             return value
-
-

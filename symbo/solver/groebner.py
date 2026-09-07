@@ -27,6 +27,26 @@ from typing import List, Dict, Generator, Optional, Any, Union
 import json
 
 
+class GroebnerSolveError(ValueError):
+    """Base class for algebraic failures of a Gröbner solve."""
+
+
+class InconsistentPolynomialSystem(GroebnerSolveError):
+    """The ideal contains 1: the system has no solutions."""
+
+
+class PositiveDimensionalIdeal(GroebnerSolveError):
+    """The solution set is a positive-dimensional family, not a finite list."""
+
+    def __init__(self, info: Dict[str, Any]):
+        self.info = info
+        free = info.get("free_variables", [])
+        super().__init__(
+            "polynomial system is under-determined "
+            f"(dimension {info.get('dimension', '?')}, free variables {free})"
+        )
+
+
 class GröbnerBasisState:
     """
     State object for Gröbner basis computation.
@@ -450,7 +470,10 @@ def handle_infinite_solutions(basis_polynomials: List[sp.Expr],
 
 
 __all__ = [
+    'GroebnerSolveError',
     'GröbnerBasisState',
+    'InconsistentPolynomialSystem',
+    'PositiveDimensionalIdeal',
     'RealTimeGröbnerSolver',
     'StreamingGröbnerSolver',
     'handle_infinite_solutions',

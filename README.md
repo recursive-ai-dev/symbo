@@ -6,8 +6,9 @@ psychcoherence@gmail.com OR therealmichaelmaillet@gmail.com
 
 
 Symbo is a hybrid symbolic–numeric reasoning system built from the ground up by
-deconstructing **318 classical algorithms** across algebra, optimization, dynamics,
-and computational geometry.
+deconstructing classical algorithms across algebra, optimization, dynamics,
+and computational geometry into reusable primitives (see
+[`docs/algorithm-corpus.md`](docs/algorithm-corpus.md)).
 
 Instead of adopting any algorithm wholesale, each was **reduced to its atomic
 computational components**, de-parented from its original context, and evaluated
@@ -20,7 +21,8 @@ primitives were then recombined into a unified framework capable of:
 - conducting second-order perturbation analysis,
 - producing neural-assisted approximate solutions,
 - running pathfinding over symbolic energy landscapes to perform reasoning,
-- and enabling browser-side inference through WASM.
+- and exposing WASM-*friendly* (JSON/msgpack-serializable) interfaces for
+  browser runtimes — this repository does not ship a `.wasm` build.
 
 The result is not a clone of existing tools, nor a traditional CAS, nor a neural network.
 It is a **new model class**: a nano-scale symbolic generative engine that can be trained,
@@ -33,7 +35,7 @@ Symbo provides:
 - A generative Taylor-expansion core 
 - A multi-method coefficient solver (Gröbner bases, perturbation theory, least squares)  
 - Arrow/MessagePack serialization for high-speed I/O  
-- WASM-friendly execution for browser runtimes  
+- WASM-friendly (JSON-serializable) interfaces; no browser bundle is produced  
 - Manifold-based reasoning via A* pathfinding
 - Explainability through derivative trees and variable influence mapping
 

@@ -22,12 +22,17 @@ Uhlig's log-linear toolbox):
    the deviations of the *predetermined* drivers (state variables and shocks),
    with unknown coefficients ``g_{v,w}`` (and ``g_{v,w1,w2}`` at second order).
 3. Substitute the conjecture into every equation, expand in a formal perturbation
-   parameter ``eps``, and require each monomial coefficient to vanish. At first
-   order the system is linear in the ``g``'s; at second order it is linear in the
-   second-order ``g``'s once the first-order ones are known, so both stages are
-   solved with exact linear algebra.
-4. Report the residual of the solved system, so the approximation order is
-   verifiable rather than asserted.
+   parameter ``eps``, and require each monomial coefficient to vanish. Expectational
+   consistency (``c_{t+1} = Policy_c(k_{t+1}, a_{t+1})``) makes the first-order
+   conditions *quadratic* in the ``g``'s — the same quadratic matrix equation that
+   Blanchard–Kahn / Klein / QZ solvers attack. This module solves that system with
+   damped Newton and keeps the Blanchard–Kahn-stable root (state-transition
+   eigenvalues inside the unit circle). With the first-order coefficients known,
+   the second-order conditions are linear in the quadratic ``g``'s and are solved
+   with exact linear algebra.
+4. Report the residual of the solved system against the *raw* user equations
+   (never through the same substitution used to form the conditions), so the
+   approximation order is independently verifiable.
 
 Conventions
 -----------
@@ -522,7 +527,13 @@ class SecondOrderPerturbation:
             if var in self.state_vars:
                 subs[self._lead(var)] = ss[var] + policy
             else:
-                shifted = policy.subs({d: one_step(d) for d in self.drivers})
+                # ``policy`` is a polynomial in the *deviation* symbols
+                # (``Delta_k``, ``Delta_a``, ...), not in the driver levels.
+                # Substituting the one-step map for those deviations is what
+                # makes ``c_{t+1} = Policy_c(k_{t+1}, a_{t+1})``. Keying the
+                # substitution on the driver symbols themselves is a no-op and
+                # silently sets ``c_{t+1} = c_t``.
+                shifted = policy.subs({deltas[d]: one_step(d) for d in self.drivers})
                 subs[self._lead(var)] = ss[var] + sp.expand(shifted)
 
         for shock in self.shock_vars:
@@ -708,6 +719,173 @@ class SecondOrderPerturbation:
 
         return coeffs, sorted(set(free_params))
 
+    def _is_linear_in(self, conditions: List[sp.Expr], unknowns: List[Symbol]) -> bool:
+        """True when every condition is affine in ``unknowns``."""
+        if not unknowns:
+            return True
+        for expr in conditions:
+            try:
+                poly = sp.Poly(sp.expand(expr), *unknowns)
+            except (ValueError, TypeError, AttributeError, sp.SympifyError):
+                return False
+            if poly.total_degree() > 1:
+                return False
+        return True
+
+    def _state_spectral_radius(self, coeffs: Dict[str, float]) -> float:
+        """Spectral radius of the state-to-state block of the linear policy."""
+        n = len(self.state_vars)
+        if n == 0:
+            return 0.0
+        G = np.zeros((n, n), dtype=float)
+        for i, si in enumerate(self.state_vars):
+            for j, sj in enumerate(self.state_vars):
+                G[i, j] = float(coeffs.get(self._first_name(si, sj), 0.0))
+        return float(np.max(np.abs(np.linalg.eigvals(G))))
+
+    def _first_order_guesses(self, names: List[str]) -> List[List[float]]:
+        """Starting points for the quadratic first-order Newton solve."""
+        n = len(names)
+        guesses: List[List[float]] = [[0.0] * n]
+        state_diag = {self._first_name(s, s) for s in self.state_vars}
+        for diag in (0.5, 0.8, 0.9, 0.95, 0.99):
+            guess = [diag if name in state_diag else 0.0 for name in names]
+            guesses.append(guess)
+        rng = np.random.default_rng(0)
+        for _ in range(6):
+            guesses.append(rng.normal(0.0, 0.25, size=n).tolist())
+        return guesses
+
+    def _solve_nonlinear_system(self,
+                                conditions: List[sp.Expr],
+                                unknowns: List[Symbol],
+                                stage: str) -> Tuple[Dict[str, float], List[str]]:
+        """
+        Damped Newton solve of (possibly quadratic) perturbation conditions.
+
+        Several starts are tried; among converged roots the Blanchard–Kahn
+        filter keeps those whose state-transition matrix has spectral radius
+        strictly less than one. This is the undetermined-coefficient analogue
+        of a QZ/Klein decomposition.
+        """
+        jac_exprs = [[sp.diff(cond, unknown) for unknown in unknowns] for cond in conditions]
+        f_func = sp.lambdify(unknowns, conditions, modules="numpy")
+        j_func = sp.lambdify(unknowns, jac_exprs, modules="numpy")
+        names = [u.name for u in unknowns]
+
+        def pack(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+            fx = np.atleast_1d(np.asarray(f_func(*x), dtype=float)).reshape(-1)
+            jac = np.asarray(j_func(*x), dtype=float)
+            jac = np.atleast_2d(jac)
+            if jac.shape[0] != fx.size:
+                jac = jac.reshape(fx.size, len(unknowns))
+            return fx, jac
+
+        candidates: List[Tuple[float, float, Dict[str, float]]] = []
+        for guess in self._first_order_guesses(names):
+            x = np.asarray(guess, dtype=float)
+            failed = False
+            for _ in range(50):
+                try:
+                    fx, jac = pack(x)
+                except (TypeError, ValueError, FloatingPointError):
+                    failed = True
+                    break
+                if not np.all(np.isfinite(fx)):
+                    failed = True
+                    break
+                err = float(np.max(np.abs(fx)))
+                if err < 1e-12:
+                    break
+                try:
+                    dx, *_ = np.linalg.lstsq(jac, -fx, rcond=None)
+                except np.linalg.LinAlgError:
+                    failed = True
+                    break
+                if not np.all(np.isfinite(dx)):
+                    failed = True
+                    break
+                step = 1.0
+                accepted = False
+                for _damp in range(10):
+                    x_new = x + step * dx
+                    try:
+                        fx_new, _ = pack(x_new)
+                    except (TypeError, ValueError, FloatingPointError):
+                        step *= 0.5
+                        continue
+                    if np.all(np.isfinite(fx_new)) and float(np.max(np.abs(fx_new))) <= err * 1.05:
+                        x = x_new
+                        accepted = True
+                        break
+                    step *= 0.5
+                if not accepted:
+                    x = x + dx
+            if failed:
+                continue
+            try:
+                fx, _ = pack(x)
+                err = float(np.max(np.abs(fx)))
+            except (TypeError, ValueError, FloatingPointError):
+                continue
+            if not np.all(np.isfinite(fx)) or err > 1e-6:
+                continue
+            coeffs = {name: float(xi) for name, xi in zip(names, x, strict=True)}
+            for name, value in list(coeffs.items()):
+                if abs(value) < 1e-10:
+                    coeffs[name] = 0.0
+            radius = self._state_spectral_radius(coeffs)
+            candidates.append((radius, err, coeffs))
+
+        if not candidates:
+            raise np.linalg.LinAlgError(
+                f"{stage}: the perturbation conditions are nonlinear in the "
+                "coefficients and no numeric root was found. This is the "
+                "quadratic matrix equation of a linear rational-expectations "
+                "model; try a closer steady-state guess."
+            )
+
+        # Deduplicate roots that Newton reached from several starts.
+        unique: List[Tuple[float, float, Dict[str, float]]] = []
+        for radius, err, coeffs in candidates:
+            if any(max(abs(coeffs[k] - other[2][k]) for k in coeffs) < 1e-7
+                   for other in unique):
+                continue
+            unique.append((radius, err, coeffs))
+
+        stable = [item for item in unique if item[0] < 1.0 - 1e-8]
+        pool = stable if stable else unique
+        pool.sort(key=lambda item: (item[1], item[0]))
+        radius, err, coeffs = pool[0]
+        if not stable:
+            logger.warning(
+                "%s: no Blanchard-Kahn-stable solution (smallest spectral "
+                "radius %.4f); returning the least-residual candidate",
+                stage, radius,
+            )
+        else:
+            logger.info(
+                "%s: BK-stable solution, spectral radius %.4f, residual %.3e "
+                "(%d distinct root(s) found)",
+                stage, radius, err, len(unique),
+            )
+        return coeffs, []
+
+    def _solve_coefficients(self,
+                            conditions: List[sp.Expr],
+                            unknowns: List[Symbol],
+                            stage: str) -> Tuple[Dict[str, float], List[str]]:
+        """Linear solve when possible, otherwise the BK-filtered Newton solve."""
+        eqs = [sp.nsimplify(c, rational=False) for c in conditions]
+        nonzero = [e for e in eqs if e != 0]
+        if not unknowns:
+            return {}, []
+        if not nonzero:
+            return {}, []
+        if self._is_linear_in(nonzero, unknowns):
+            return self._solve_linear_system(conditions, unknowns, stage)
+        return self._solve_nonlinear_system(nonzero, unknowns, stage)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -744,7 +922,7 @@ class SecondOrderPerturbation:
         coeffs.update(warm_start or {})
 
         conditions = self._order_conditions(coeffs, steady_state, 1, deltas, eps)
-        solved, _ = self._solve_linear_system(conditions, unknowns, "first order")
+        solved, _ = self._solve_coefficients(conditions, unknowns, "first order")
         return solved
 
     def compute_second_order(self,
@@ -883,6 +1061,19 @@ class SecondOrderPerturbation:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+    def _level_at(self,
+                  var: Symbol,
+                  point: Dict[Any, float],
+                  ss: Dict[Symbol, float]) -> float:
+        """Read a variable's level from ``point`` (symbol or name keys) or the SS."""
+        if var in point:
+            return float(point[var])
+        name = var.name
+        for key, value in point.items():
+            if getattr(key, "name", str(key)) == name:
+                return float(value)
+        return float(ss.get(var, 0.0))
+
     def _residual_at(self,
                      solution: PerturbationSolution,
                      point: Dict[Symbol, float]) -> float:
@@ -893,16 +1084,38 @@ class SecondOrderPerturbation:
         controls follow their policy, the states' next values follow theirs, shocks
         follow their AR(1) law, and each equation is then evaluated.
         """
-        deltas = {d: point[d] - solution.steady_state.get(d, 0.0) for d in self.drivers}
-        coeffs = {**solution.first_order, **solution.second_order}
-        subs = self._variable_substitutions(coeffs, solution.steady_state, deltas)
+        ss = solution.steady_state
+        driver_now = {d.name: self._level_at(d, point, ss) for d in self.drivers}
+
+        current: Dict[Symbol, float] = {}
+        for var in self.state_vars:
+            current[var] = driver_now[var.name]
+        for shock in self.shock_vars:
+            current[shock] = driver_now[shock.name]
+        for var in self.control_vars:
+            current[var] = float(solution.evaluate_policy(var.name, driver_now))
+
+        leads: Dict[Symbol, float] = {}
+        next_drivers: Dict[str, float] = {}
+        for var in self.state_vars:
+            nxt = float(solution.evaluate_policy(var.name, driver_now))
+            leads[self._lead(var)] = nxt
+            next_drivers[var.name] = nxt
+        for shock in self.shock_vars:
+            rho = float(self.shock_persistence[shock])
+            shock_ss = float(ss.get(shock, 0.0))
+            nxt = shock_ss + rho * (current[shock] - shock_ss)
+            leads[self._lead(shock)] = nxt
+            next_drivers[shock.name] = nxt
+        for var in self.control_vars:
+            leads[self._lead(var)] = float(solution.evaluate_policy(var.name, next_drivers))
 
         worst = 0.0
         for eq in self.equations:
             expr = sp.sympify(eq).subs(self.parameters)
             if isinstance(expr, sp.Equality):
                 expr = expr.lhs - expr.rhs
-            value = expr.xreplace(subs)
+            value = expr.xreplace({**current, **leads})
             if value.free_symbols:
                 raise ValueError(
                     f"residual still contains symbols: {sorted(str(s) for s in value.free_symbols)}"

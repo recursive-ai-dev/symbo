@@ -32,7 +32,7 @@ def rbc_model():
     params = {alpha: 0.36, beta: 0.99, delta: 0.08, rho: 0.9}
 
     euler = c**(-1) - beta * cp**(-1) * (alpha * sp.exp(ap) * kp**(alpha - 1) + 1 - delta)
-    resource = alpha * sp.exp(a) * k**alpha + (1 - delta) * k - c - kp
+    resource = sp.exp(a) * k**alpha + (1 - delta) * k - c - kp
     shock_law = ap - rho * a
 
     return [euler, resource, shock_law], [k], [c], [a], params, {'rho': rho}

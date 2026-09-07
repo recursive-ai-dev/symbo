@@ -9,15 +9,16 @@
 WASM-Friendly Execution Bindings
 =================================
 
-This module provides WASM-compatible interfaces for Symbo functionality,
-ensuring all data structures and function signatures can be efficiently
-serialized/deserialized for browser-side execution.
+WASM-*friendly* interfaces: JSON/msgpack-serializable function signatures so a
+caller *could* wrap them in Pyodide or a similar runtime. This repository does
+not produce a ``.wasm`` artifact, a Pyodide/Emscripten/WASI toolchain, or a
+browser bundle (``build_desktop_binaries.sh`` builds PyInstaller *desktop*
+executables).
 
 Key Features:
-- WASM-compatible function signatures (primitives only)
+- JSON-friendly function signatures (primitives only)
 - MessagePack serialization for complex types
-- Browser-friendly JSON interfaces
-- Efficient data transfer
+- A browser *test payload* (Python-side contract, not a compiled module)
 """
 
 import sympy as sp

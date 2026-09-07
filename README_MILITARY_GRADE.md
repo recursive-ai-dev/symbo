@@ -159,19 +159,19 @@ for t in range(100):
 ## Key Features
 
 ### 1. Health Monitoring
-```python
+```text
 health = brain.health_check()
 # Returns: status, success_rate, cache_hit_rate, avg_time, etc.
 ```
 
 ### 2. Agency & Learning
-```python
+```text
 status = brain.get_agency_status()
 # Returns: experiences_recorded, patterns_learned, recommendations
 ```
 
 ### 3. Security Validation
-```python
+```text
 brain.set_validation_bounds('x', -10, 10)
 # Automatically validates all inputs
 ```
@@ -214,7 +214,8 @@ Test coverage:
 ## Performance
 
 - **Overhead**: ~0.0001s per operation (minimal)
-- **Memory**: ~50KB for 1000 experiences
+- **Memory**: ~50KB for 1000 experiences (`NanoTensor._max_experience`).
+  The standalone `AgencyCore` buffer defaults to 10000 (`max_memory_size`).
 - **Caching**: 100-200x speedup on repeated operations
 - **Recovery**: Automatic on failures
 
